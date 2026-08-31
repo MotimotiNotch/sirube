@@ -23,5 +23,8 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
-tauri-plugin-fs = "2.5.1"
+# `watch` はフィーチャの下にある。有効にしないと watcher モジュールごと消え、
+# capabilities に fs:allow-watch を書いていても実行時に "Command watch not found"
+# になる（2026-08-31 の初回起動で踏んだ）。外部編集の即時反映は必須機能。
+tauri-plugin-fs = { version = "2.5.1", features = ["watch"] }
 tauri-plugin-dialog = "2.7.2"

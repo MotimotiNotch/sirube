@@ -8,6 +8,27 @@
 // Bun compile 版はランタイム本体だけで 84MB あり、それが配布時の AV スキャン待ちを
 // 悪化させていた。
 
+use tauri_plugin_fs::FsExt;
+
+/// ユーザーが選んだ vault フォルダを fs プラグインのスコープに入れる。
+///
+/// capabilities に `fs:allow-read-dir` 等を並べても、それは「コマンドを呼んでよい」
+/// までしか意味しない。実際のパスは `resolve_path()` のスコープ検査を通る必要があり、
+/// 許可された範囲が空だと全部 `PathForbidden` になる。vault の場所は実行時にしか
+/// 分からないので、静的な capabilities では書けない——ここで実行時に足す。
+///
+/// `**` を capabilities に書いて全許可にする手もあるが、それはユーザーのディスク全体を
+/// 開けることになる。選ばれた1フォルダだけを開ける方を採る。
+///
+/// スコープは再起動で消えるので、保存済みパスから復帰するときもフロントから毎回呼ぶ。
+#[tauri::command]
+fn allow_vault(app: tauri::AppHandle, path: String) -> Result<(), String> {
+  app
+    .fs_scope()
+    .allow_directory(&path, true)
+    .map_err(|e| format!("vault フォルダへのアクセスを許可できませんでした: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -25,6 +46,7 @@ pub fn run() {
       }
       Ok(())
     })
+    .invoke_handler(tauri::generate_handler![allow_vault])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
