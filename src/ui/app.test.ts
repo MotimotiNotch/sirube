@@ -46,8 +46,24 @@ afterAll(() => {
 
 describe("起動直後", () => {
   test("「今やれること」が中央に出る", () => {
+    // 見出しはパンくずだけが持つ。中央には結果そのものを出す（2026-08-31、
+    // サイドバー・パンくず・リスト見出しで3回同じ文字が並んでいたのをやめた）。
     expect(text("breadcrumb")).toContain("今やれること");
-    expect(text("center-body")).toContain("今やれること");
+    expect(text("center-body")).not.toContain("今やれること");
+    expect(text("center-body")).toContain("READMEとマニュアルを書く");
+  });
+
+  test("全行で同じになる状態バッジは出さない", () => {
+    // 「今やれること」は定義上すべて ACTIONABLE。6行に同じ語を並べても
+    // 情報量はゼロで、右端を潰すだけだった。
+    expect($("center-body").querySelectorAll(".hit").length).toBeGreaterThan(1);
+    expect($("center-body").querySelectorAll(".hit .state-badge").length).toBe(0);
+  });
+
+  test("「今やれること」では隣接を出さない（パンくずと重複するため）", () => {
+    // 上方向の隣接（これを待っている／属する先）はパンくずと同じものを指す。
+    // 並べるとカードが二段になり、それが文字量の主因だった。
+    expect($("center-body").querySelectorAll(".neighbors").length).toBe(0);
   });
 
   test("サイドバーに目的（入次数0）が並ぶ", () => {
@@ -92,7 +108,9 @@ describe("検索", () => {
     expect(body).toContain("Tauriシェル");
     // 打っていない語が文脈として現れる
     expect(body).toContain("Rustツールチェーンを入れる");
-    expect(body).toContain("これが必要");
+    // 隣接は検索のときだけ出る。方向のラベルはアイコン＋ツールチップに逃がした
+    // ので、文字ではなくチップの存在で確かめる。
+    expect($("center-body").querySelectorAll(".neighbors .chip").length).toBeGreaterThan(0);
   });
 });
 

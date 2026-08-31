@@ -284,8 +284,8 @@ button { font: inherit; color: inherit; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-panel);
-  padding: 10px 12px;
-  margin-bottom: 8px;
+  padding: 7px 12px;
+  margin-bottom: 5px;
 }
 .hit-main {
   display: flex;
@@ -298,21 +298,26 @@ button { font: inherit; color: inherit; }
   cursor: pointer;
   text-align: left;
 }
-.hit-name { font-weight: 600; flex: 0 1 auto; }
+.hit-name { font-weight: 600; flex: 0 0 auto; }
 .hit-meta {
-  margin-left: auto;
+  margin-left: 10px;
   display: flex;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
 }
+/* パンくずは名前と同じ行に流す。長ければ省略記号で切る——ここを折り返させると
+ * 行が二段になり、それが「文字が多い」の主因だった。 */
 .hit-crumb {
   font-size: 12px;
   color: var(--fg-faint);
-  margin-top: 2px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  margin-left: auto;
+  padding-left: 24px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hit-indegree {
   font-size: 11px;
@@ -380,7 +385,24 @@ button { font: inherit; color: inherit; }
   gap: 6px;
   color: var(--st-cyclic);
 }
-.cycle-notice p { margin: 0 0 8px; font-size: 13px; color: var(--fg-muted); }
+.cycle-notice p { margin: 6px 0 0; font-size: 13px; color: var(--fg-muted); }
+.cycle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* 説明は初回しか読まれないので畳む。開いた状態は覚えない（毎回閉じている）。 */
+.cycle-why { margin-top: 6px; }
+.cycle-why summary {
+  font-size: 12px;
+  color: var(--fg-faint);
+  cursor: pointer;
+  list-style: none;
+}
+.cycle-why summary::-webkit-details-marker { display: none; }
+.cycle-why summary::before { content: "? "; }
+.cycle-why summary:hover { color: var(--fg-muted); }
 .cycle-ring {
   display: flex;
   flex-wrap: wrap;
