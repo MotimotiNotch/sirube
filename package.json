@@ -8,7 +8,7 @@
     "dev": "bun run src/dev/serve.ts",
     "build:web": "bun run scripts/build-web.ts",
     "tauri": "tauri",
-    "release": "cmd //c \"scripts\\with-msvc.bat bunx tauri build\" && bun run scripts/show-release.ts",
+    "release": "bun run scripts/release.ts",
     "icons": "bun run scripts/gen-icons.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"

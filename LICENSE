@@ -22,15 +22,15 @@ SOFTWARE.
 
 ---
 
-This project uses game data from WFCD (Warframe Community Developers)
-`warframe-items` and `warframe-drop-data`, both MIT licensed. Warframe is a
-registered trademark of Digital Extremes Ltd. This is an unofficial,
-non-commercial fan tool and is not affiliated with or endorsed by Digital
-Extremes.
+Third-party assets and dependencies
+-----------------------------------
 
----
+Icons are from Lucide (https://lucide.dev), MIT licensed. The official SVG
+path data is vendored verbatim into `src/ui/icons.ts` without modification;
+see `scripts/gen-icons.ts` for the list and the regeneration step.
 
-Two badge icons (Vault status, Prime Resurgence status) are from
-game-icons.net, licensed CC BY 3.0:
-- "Padlock" by Lorc (lorc_padlock)
-- "Hourglass" by Lorc (lorc_hourglass)
+The distributed application also bundles the following, all permissively
+licensed: js-yaml (MIT), zod (MIT), and the Tauri JavaScript APIs
+`@tauri-apps/api`, `@tauri-apps/plugin-fs`, `@tauri-apps/plugin-dialog`
+(MIT OR Apache-2.0). The Rust side links Tauri itself and its plugins
+(MIT OR Apache-2.0); see `src-tauri/Cargo.lock` for the full set.
