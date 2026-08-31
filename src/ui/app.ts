@@ -139,13 +139,24 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
     if (e.key === "Escape") closeModal();
   });
 
+  // グラフは描画時のペイン幅を測って折り返し位置を決めるため、ウィンドウを
+  // 広げても畳んだままになる（2026-08-31 の実機確認で発見。幅は足りているのに
+  // 子が1行1個で並んでいた）。リサイズが止まってから引き直す。
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+  window.addEventListener("resize", () => {
+    if (resizeTimer !== undefined) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (state.mode === "graph") renderCenter();
+    }, 120);
+  });
+
   /** 前提の一括追加。分解の流れに直結する MVP の中核。 */
   const openBulkAdd = (targetId: string): void => {
     clear(modal);
     modal.append(h("h3", {}, [`「${targetId}」には何が必要？`]));
     modal.append(
       h("p", { class: "hint" }, [
-        "1行に1つ書く。既にある名前を書けば、そのノードに繋がる（新しくは作られない）。",
+        "1行に1つ書く。既にある名前を書けば、そのノードに繋がる（新しくは作られない）。Ctrl+Enter で追加。",
       ]),
     );
     const ta = h("textarea", { placeholder: "引っ越し先の家\nお金を貯める\n不動産に行く" }) as HTMLTextAreaElement;
@@ -163,6 +174,14 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
     const cancel = h("button", { class: "btn", type: "button" }, ["キャンセル"]);
     cancel.addEventListener("click", closeModal);
     const ok = h("button", { class: "btn primary", type: "button" }, ["追加"]);
+    // 改行で項目を区切る入力なので、Enter は改行のまま。確定は Ctrl+Enter。
+    // ここでマウスへ往復させると、3行打つたびに手が離れて分解の速度が落ちる。
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        ok.click();
+      }
+    });
     ok.addEventListener("click", async () => {
       const res = await store.addBulkRequires(state.graph, targetId, ta.value);
       if (res.errors.length > 0) {
@@ -348,6 +367,10 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
   };
 
   const render = (): void => {
+    // 何も選んでいない間はインスペクタごと畳む。起動直後は「どれをやるか選ぶ」
+    // 段階で、まだ詳細を見る相手がいない。空のパネルで画面の3割を占めるより、
+    // 一覧に幅を渡す方がこの画面の仕事に合っている。
+    document.body.classList.toggle("no-inspector", !state.selectedId || !state.graph.nodes[state.selectedId]);
     renderSidebar();
     renderBreadcrumb();
     renderCenter();

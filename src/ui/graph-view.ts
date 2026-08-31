@@ -11,6 +11,7 @@ import { resolveState } from "../core/engine.ts";
 const NODE_H = 40;
 const GAP_X = 18;
 const GAP_Y = 66;
+const WRAP_GAP_Y = 12; // 折り返した同じ階層の段どうしの間隔（階層間より狭くする）
 const PAD = 20;
 const CHAR_W = 13; // 日本語混じりの概算。実測より広めに取って被りを防ぐ
 
@@ -63,30 +64,63 @@ export function renderGraph(
   const rowWidth = (ids: string[]): number =>
     ids.reduce((acc, id) => acc + boxWidth(graph.nodes[id]!.name) + GAP_X, -GAP_X);
 
-  const reqW = rowWidth(reqIds);
-  const conW = rowWidth(conIds);
-  const contentW = Math.max(focusW, reqW, conW, 240);
+  // 収まる幅に折り返す。分解すればするほど子が増えるツールなので、
+  // 増えた瞬間に横スクロールへ逃がすと「作ったものが見えない」状態になる
+  // （2026-08-31 の実機確認。子が8個で右端が切れた）。縮尺を縮める案は
+  // 文字が読めなくなり、グリッドは「1段 = 1階層」という読み方を壊すので、
+  // 段を増やす方を採る。
+  const avail = Math.max(320, (container.clientWidth || 640) - PAD * 2 - 8);
+
+  /** ids を、1行が avail に収まるように分割する。 */
+  const wrapRows = (ids: string[]): string[][] => {
+    const lines: string[][] = [];
+    let line: string[] = [];
+    let w = 0;
+    for (const id of ids) {
+      const bw = boxWidth(graph.nodes[id]!.name);
+      const next = line.length === 0 ? bw : w + GAP_X + bw;
+      if (line.length > 0 && next > avail) {
+        lines.push(line);
+        line = [id];
+        w = bw;
+      } else {
+        line.push(id);
+        w = next;
+      }
+    }
+    if (line.length > 0) lines.push(line);
+    return lines;
+  };
+
+  const reqLines = wrapRows(reqIds);
+  const conLines = wrapRows(conIds);
+  const widest = Math.max(focusW, ...reqLines.map(rowWidth), ...conLines.map(rowWidth), 240);
+  const contentW = Math.min(widest, avail);
   const totalW = contentW + PAD * 2;
 
   const centerX = PAD + contentW / 2;
   boxes.push({ id: focusId, x: centerX - focusW / 2, y: PAD, w: focusW, state: resolveState(graph, focusId, cyclic), kind: "focus" });
 
   let y = PAD + NODE_H + GAP_Y;
-  const layRow = (ids: string[], kind: "requires" | "contains", rowY: number): void => {
-    let x = PAD + (contentW - rowWidth(ids)) / 2;
-    for (const id of ids) {
-      const w = boxWidth(graph.nodes[id]!.name);
-      boxes.push({ id, x, y: rowY, w, state: resolveState(graph, id, cyclic), kind });
-      x += w + GAP_X;
+  /** 折り返した各段を中央揃えで置き、使った高さを返す。 */
+  const layLines = (lines: string[][], kind: "requires" | "contains", startY: number): number => {
+    let rowY = startY;
+    for (const line of lines) {
+      let x = PAD + (contentW - rowWidth(line)) / 2;
+      for (const id of line) {
+        const w = boxWidth(graph.nodes[id]!.name);
+        boxes.push({ id, x, y: rowY, w, state: resolveState(graph, id, cyclic), kind });
+        x += w + GAP_X;
+      }
+      rowY += NODE_H + WRAP_GAP_Y;
     }
+    return rowY - WRAP_GAP_Y - startY;
   };
-  if (reqIds.length > 0) {
-    layRow(reqIds, "requires", y);
-    y += NODE_H + GAP_Y;
+  if (reqLines.length > 0) {
+    y += layLines(reqLines, "requires", y) + GAP_Y;
   }
-  if (conIds.length > 0) {
-    layRow(conIds, "contains", y);
-    y += NODE_H + GAP_Y;
+  if (conLines.length > 0) {
+    y += layLines(conLines, "contains", y) + GAP_Y;
   }
   const totalH = Math.max(y - GAP_Y + PAD, PAD * 2 + NODE_H);
 

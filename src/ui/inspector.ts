@@ -100,8 +100,12 @@ export function renderInspector(
     container.append(sec);
   };
 
-  linkList("これが必要（前提）", "cornerDownRight", node.requires, true);
-  linkList("これで構成（内包）", "layers", node.contains, true);
+  // 下向き（これが必要／これで構成）は出さない。Chain View が同じものを
+  // 描いており、ボックスもクリックでドリルできて状態色も付いている。完全な重複。
+  //
+  // 上向きは Chain View に無いので残す。グラフは下向きしか描かず、パンくずは
+  // 自分が辿ってきた道しか持たないため、親が複数ある合流ノードでは
+  // ここを消すと他の親に到達できなくなる。
   linkList("これを待っている", "listChecks", rev.requiredBy.get(selectedId) ?? [], false);
   linkList("属する先", "chevronRight", rev.containedBy.get(selectedId) ?? [], false);
 

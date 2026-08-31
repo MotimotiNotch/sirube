@@ -164,8 +164,27 @@ describe("前提の一括追加", () => {
     await tick();
 
     expect($("modal-backdrop").classList.contains("hidden")).toBe(true);
-    expect(text("inspector")).toContain("マイナンバーカードを用意する");
+    // 追加された前提は Chain View に出る。インスペクタは下向きの一覧を持たない
+    // （2026-08-31、グラフと完全に重複していたため削除）。
+    expect(text("center-body")).toContain("マイナンバーカードを用意する");
     expect(text("center-body")).toContain("医療費の領収書を集める");
+    expect(text("inspector")).not.toContain("これが必要");
+  });
+
+  test("Ctrl+Enter で確定できる", async () => {
+    // 改行で項目を区切る入力なので、確定でマウスへ往復させると分解が止まる。
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    findButton("inspector", "前提を一括追加")!.click();
+    await tick();
+    const ta = $("modal").querySelector("textarea") as HTMLTextAreaElement;
+    ta.value = "e-Taxの利用者識別番号を取る";
+    ta.dispatchEvent(new Event("input"));
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
+    await tick();
+
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(true);
+    expect(text("center-body")).toContain("e-Taxの利用者識別番号を取る");
   });
 });
 

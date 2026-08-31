@@ -250,6 +250,9 @@ button { font: inherit; color: inherit; }
   padding: 16px;
   overflow-y: auto;
 }
+/* 未選択のときはインスペクタを閉じて中央に幅を渡す。app.ts が body に付ける。 */
+body.no-inspector .app-body { grid-template-columns: 220px minmax(0, 1fr) 0; }
+body.no-inspector .inspector { display: none; }
 
 /* --- 状態バッジ / ノード ------------------------------------------------- */
 
