@@ -152,9 +152,27 @@ button { font: inherit; color: inherit; }
 .app-body {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 320px;
+  /* インスペクタの幅は可変。横並びとモーダルのどちらが正しいかを決め打ちせず、
+   * その場で寄せられるようにする（2026-08-31 のっち案）。値は app.ts が
+   * localStorage から復元して --inspector-w に入れる。 */
+  grid-template-columns: 220px minmax(0, 1fr) 5px var(--inspector-w, 320px);
   min-height: 0;
 }
+
+/* 掴む的が細すぎると当たらないので、見た目は1本の線、当たり判定は左右に広げる。 */
+.resizer {
+  position: relative;
+  cursor: col-resize;
+  background: var(--border);
+}
+.resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+}
+.resizer:hover,
+.resizer.dragging { background: var(--border-strong); }
+body.resizing { cursor: col-resize; user-select: none; }
 
 .sidebar {
   border-right: 1px solid var(--border);
@@ -251,8 +269,9 @@ button { font: inherit; color: inherit; }
   overflow-y: auto;
 }
 /* 未選択のときはインスペクタを閉じて中央に幅を渡す。app.ts が body に付ける。 */
-body.no-inspector .app-body { grid-template-columns: 220px minmax(0, 1fr) 0; }
-body.no-inspector .inspector { display: none; }
+body.no-inspector .app-body { grid-template-columns: 220px minmax(0, 1fr) 0 0; }
+body.no-inspector .inspector,
+body.no-inspector .resizer { display: none; }
 
 /* --- 状態バッジ / ノード ------------------------------------------------- */
 

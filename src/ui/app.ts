@@ -139,6 +139,58 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
     if (e.key === "Escape") closeModal();
   });
 
+  // ---- インスペクタ幅の可変化 --------------------------------------------
+  //
+  // 「横並びで常時見せる」か「モーダルで全幅を使う」かは場面で変わる。
+  // 分解しているときはグラフを広く、メモを書いているときは右を広く取りたい。
+  // どちらかに決め打ちせず、その場で寄せられるようにする（のっち案）。
+  const INSPECTOR_W_KEY = "sirube.inspectorWidth";
+  const INSPECTOR_W_MIN = 240;
+  const INSPECTOR_W_DEFAULT = 320;
+  const setInspectorWidth = (px: number): void => {
+    // 中央に最低限の作業幅を残す。右に寄せ切ってグラフが潰れる状態は作らない。
+    const max = Math.max(INSPECTOR_W_MIN, window.innerWidth - 220 - 360);
+    const w = Math.round(Math.min(Math.max(px, INSPECTOR_W_MIN), max));
+    document.documentElement.style.setProperty("--inspector-w", `${w}px`);
+  };
+  {
+    const saved = Number(localStorage.getItem(INSPECTOR_W_KEY));
+    if (Number.isFinite(saved) && saved > 0) setInspectorWidth(saved);
+  }
+  const resizer = document.getElementById("inspector-resizer");
+  if (resizer) {
+    let dragging = false;
+    const onMove = (e: PointerEvent): void => {
+      if (!dragging) return;
+      setInspectorWidth(window.innerWidth - e.clientX);
+    };
+    const stop = (): void => {
+      if (!dragging) return;
+      dragging = false;
+      resizer.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      const w = getComputedStyle(document.documentElement).getPropertyValue("--inspector-w").trim();
+      if (w) localStorage.setItem(INSPECTOR_W_KEY, String(parseInt(w, 10)));
+      // 折り返し位置は描画時のペイン幅で決まるので、離した時点で引き直す。
+      if (state.mode === "graph") renderCenter();
+    };
+    resizer.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      resizer.classList.add("dragging");
+      document.body.classList.add("resizing");
+      resizer.setPointerCapture((e as PointerEvent).pointerId);
+    });
+    resizer.addEventListener("pointermove", onMove as EventListener);
+    resizer.addEventListener("pointerup", stop);
+    resizer.addEventListener("pointercancel", stop);
+    // ダブルクリックで既定に戻す。掴んで動かした後に戻せないと不安なので。
+    resizer.addEventListener("dblclick", () => {
+      setInspectorWidth(INSPECTOR_W_DEFAULT);
+      localStorage.setItem(INSPECTOR_W_KEY, String(INSPECTOR_W_DEFAULT));
+      if (state.mode === "graph") renderCenter();
+    });
+  }
+
   // グラフは描画時のペイン幅を測って折り返し位置を決めるため、ウィンドウを
   // 広げても畳んだままになる（2026-08-31 の実機確認で発見。幅は足りているのに
   // 子が1行1個で並んでいた）。リサイズが止まってから引き直す。
