@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" color="#1c1c1a" fill="none" role="img" aria-label="Sirube">
   <g stroke="currentColor" stroke-linecap="round">
-    <line x1="36.44" y1="27.56" x2="42.04" y2="21.48" stroke-width="4.6" stroke-dasharray="4 4.2"/>
-    <circle cx="25" cy="40" r="15.5" stroke-width="5.4"/>
+    <line x1="36.44" y1="27.56" x2="42.04" y2="21.48" stroke-width="3.8" stroke-dasharray="4 4.2"/>
+    <circle cx="25" cy="40" r="15.5" stroke-width="4.4"/>
   </g>
   <circle cx="48" cy="15" r="7.4" fill="#d98b8b"/>
 </svg>

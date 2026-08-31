@@ -57,8 +57,8 @@ const svg = SMALL
       const [p1, p2, p3, p4] = edge(c, d, 1.4);
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB} ${VB}" width="${VB}" height="${VB}" color="#1c1c1a" fill="none" role="img" aria-label="Sirube">
   <g stroke="currentColor" stroke-linecap="round">
-    <line x1="${p1}" y1="${p2}" x2="${p3}" y2="${p4}" stroke-width="4.6" stroke-dasharray="4 4.2"/>
-    <circle cx="${c.x}" cy="${c.y}" r="${c.r}" stroke-width="5.4"/>
+    <line x1="${p1}" y1="${p2}" x2="${p3}" y2="${p4}" stroke-width="3.8" stroke-dasharray="4 4.2"/>
+    <circle cx="${c.x}" cy="${c.y}" r="${c.r}" stroke-width="4.4"/>
   </g>
   <circle cx="${d.x}" cy="${d.y}" r="${d.r}" fill="${accent}"/>
 </svg>
@@ -66,12 +66,12 @@ const svg = SMALL
     })()
   : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB} ${VB}" width="${VB}" height="${VB}" color="#1c1c1a" fill="none" role="img" aria-label="Sirube">
   <g stroke="currentColor" stroke-linecap="round">
-    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke-width="2.9"/>
-    <line x1="${x3}" y1="${y3}" x2="${x4}" y2="${y4}" stroke-width="2.9"/>
-    <line x1="${x5}" y1="${y5}" x2="${x6}" y2="${y6}" stroke-width="2.9" stroke-dasharray="4.6 3.9"/>
-    <circle cx="${big.x}" cy="${big.y}" r="${big.r}" stroke-width="3.5"/>
-    <circle cx="${mid.x}" cy="${mid.y}" r="${mid.r}" stroke-width="3.3"/>
-    <circle cx="${small.x}" cy="${small.y}" r="${small.r}" stroke-width="3.2"/>
+    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke-width="2.3"/>
+    <line x1="${x3}" y1="${y3}" x2="${x4}" y2="${y4}" stroke-width="2.3"/>
+    <line x1="${x5}" y1="${y5}" x2="${x6}" y2="${y6}" stroke-width="2.3" stroke-dasharray="4.6 4.1"/>
+    <circle cx="${big.x}" cy="${big.y}" r="${big.r}" stroke-width="2.8"/>
+    <circle cx="${mid.x}" cy="${mid.y}" r="${mid.r}" stroke-width="2.6"/>
+    <circle cx="${small.x}" cy="${small.y}" r="${small.r}" stroke-width="2.5"/>
   </g>
   <circle cx="${dot.x}" cy="${dot.y}" r="${dot.r}" fill="${accent}"/>
 </svg>
