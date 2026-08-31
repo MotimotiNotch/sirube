@@ -1,0 +1,11 @@
+# Git for Windows は system の gitconfig で core.autocrlf=true を入れてくる。
+# 放っておくと clone した時点で scripts/msvc-env.sh が CRLF になり、
+# シバンが `bash\r` と解釈されて "bad interpreter" で落ちる。
+# git config は触らず、リポジトリ側で改行を固定する。
+* text=auto
+
+*.sh  text eol=lf
+*.bat text eol=crlf
+*.ico binary
+*.png binary
+*.icns binary
