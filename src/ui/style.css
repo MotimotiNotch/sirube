@@ -155,7 +155,7 @@ button { font: inherit; color: inherit; }
   /* インスペクタの幅は可変。横並びとモーダルのどちらが正しいかを決め打ちせず、
    * その場で寄せられるようにする（2026-08-31 のっち案）。値は app.ts が
    * localStorage から復元して --inspector-w に入れる。 */
-  grid-template-columns: 220px minmax(0, 1fr) 5px var(--inspector-w, 320px);
+  grid-template-columns: var(--sidebar-w, 220px) 5px minmax(0, 1fr) 5px var(--inspector-w, 320px);
   min-height: 0;
 }
 
@@ -269,9 +269,32 @@ body.resizing { cursor: col-resize; user-select: none; }
   overflow-y: auto;
 }
 /* 未選択のときはインスペクタを閉じて中央に幅を渡す。app.ts が body に付ける。 */
-body.no-inspector .app-body { grid-template-columns: 220px minmax(0, 1fr) 0 0; }
+/* 何も選んでいないときはインスペクタごと出さない（掴み手も消す。開く相手が
+ * 無いので、レールだけ残しても押せる意味がない）。手で格納した場合とは別で、
+ * そちらは幅0にするだけ——レールが残っていないと引き出せなくなる。 */
+body.no-inspector .app-body {
+  grid-template-columns: var(--sidebar-w, 220px) 5px minmax(0, 1fr) 0 0;
+}
+
+/* 格納中は境界が見えないと掴めないので、レールを少し強調しておく。
+ * レール自体は消さない——消すと引き出す手段が無くなる。 */
+.resizer.collapsed { background: var(--border-strong); }
+.sidebar, .inspector { min-width: 0; }
+
+/* 畳んだパネルの潰し方。
+ *
+ * `display: none` は使えない。グリッドの子が1つ消えると以降の要素が列を
+ * 1つずつ手前にずれて拾い、.center が掴み手の5px列に入る（2026-08-31 に
+ * 実際に踏んで、中央が5pxになった）。要素はグリッドに残したまま、
+ * padding と境界線を落として overflow を切ることで0幅に潰す。 */
+body.hide-sidebar .sidebar,
+body.hide-inspector .inspector,
 body.no-inspector .inspector,
-body.no-inspector .resizer { display: none; }
+body.no-inspector #inspector-resizer {
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+}
 
 /* --- 状態バッジ / ノード ------------------------------------------------- */
 
@@ -436,7 +459,13 @@ body.no-inspector .resizer { display: none; }
 
 /* --- グラフ -------------------------------------------------------------- */
 
-.graph-wrap { overflow: auto; }
+/* ペインが広いときにグラフが左端へ寄らないよう中央に置く。折り返しの計算は
+ * 収まる幅で済ませているので、ここは余白の配り方だけの話。 */
+.graph-wrap {
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+}
 .graph-node { cursor: pointer; }
 .graph-node .box {
   fill: var(--bg-panel);

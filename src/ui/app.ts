@@ -139,57 +139,107 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
     if (e.key === "Escape") closeModal();
   });
 
-  // ---- インスペクタ幅の可変化 --------------------------------------------
+  // ---- ペイン幅の可変化と格納 --------------------------------------------
   //
-  // 「横並びで常時見せる」か「モーダルで全幅を使う」かは場面で変わる。
-  // 分解しているときはグラフを広く、メモを書いているときは右を広く取りたい。
+  // 「横並びで常時見せる」か「グラフに全幅を渡す」かは場面によって変わる。
+  // 分解しているときはグラフを広く、メモを書くときは右を広く取りたい。
   // どちらかに決め打ちせず、その場で寄せられるようにする（のっち案）。
-  const INSPECTOR_W_KEY = "sirube.inspectorWidth";
-  const INSPECTOR_W_MIN = 240;
-  const INSPECTOR_W_DEFAULT = 320;
-  const setInspectorWidth = (px: number): void => {
-    // 中央に最低限の作業幅を残す。右に寄せ切ってグラフが潰れる状態は作らない。
-    const max = Math.max(INSPECTOR_W_MIN, window.innerWidth - 220 - 360);
-    const w = Math.round(Math.min(Math.max(px, INSPECTOR_W_MIN), max));
-    document.documentElement.style.setProperty("--inspector-w", `${w}px`);
-  };
-  {
-    const saved = Number(localStorage.getItem(INSPECTOR_W_KEY));
-    if (Number.isFinite(saved) && saved > 0) setInspectorWidth(saved);
+  //
+  // 端まで寄せると格納する。掴み手（レール）は残す——消してしまうと引き出す
+  // 手段が無くなり、%LOCALAPPDATA% を掘らせた vault パスと同じ袋小路になる。
+  const CENTER_MIN = 360; // 中央に必ず残す作業幅。両側に寄せ切って潰させない。
+
+  interface PaneOpts {
+    id: string;
+    /** 格納したときにパネル自体を消すための body クラス。列幅を0にしても
+     * padding が残って数十pxの帯になるので、幅だけでは畳みきれない。 */
+    hideClass: string;
+    cssVar: string;
+    storageKey: string;
+    defaultW: number;
+    minW: number;
+    /** ポインタ位置からこのペインの幅を出す。 */
+    widthAt(clientX: number): number;
+    /** 反対側のペインが今使っている幅（中央の残りを計算するため）。 */
+    otherW(): number;
   }
-  const resizer = document.getElementById("inspector-resizer");
-  if (resizer) {
-    let dragging = false;
-    const onMove = (e: PointerEvent): void => {
-      if (!dragging) return;
-      setInspectorWidth(window.innerWidth - e.clientX);
+
+  const paneWidth = (cssVar: string, fallback: number): number => {
+    const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue(cssVar), 10);
+    return Number.isFinite(v) ? v : fallback;
+  };
+
+  const setupPane = (o: PaneOpts): void => {
+    const rail = document.getElementById(o.id);
+    if (!rail) return;
+
+    const apply = (px: number, persist: boolean): void => {
+      // minW を下回ったら中途半端な幅で止めず、格納（0）に倒す。
+      // 「狭すぎて読めないが場所は取る」状態を作らない。
+      const max = Math.max(o.minW, window.innerWidth - o.otherW() - CENTER_MIN - 10);
+      const w = px < o.minW * 0.7 ? 0 : Math.round(Math.min(Math.max(px, o.minW), max));
+      document.documentElement.style.setProperty(o.cssVar, `${w}px`);
+      rail.classList.toggle("collapsed", w === 0);
+      document.body.classList.toggle(o.hideClass, w === 0);
+      if (persist) localStorage.setItem(o.storageKey, String(w));
     };
+
+    const saved = Number(localStorage.getItem(o.storageKey));
+    if (Number.isFinite(saved) && saved >= 0 && localStorage.getItem(o.storageKey) !== null) {
+      document.documentElement.style.setProperty(o.cssVar, `${saved}px`);
+      rail.classList.toggle("collapsed", saved === 0);
+      document.body.classList.toggle(o.hideClass, saved === 0);
+    }
+
+    let dragging = false;
     const stop = (): void => {
       if (!dragging) return;
       dragging = false;
-      resizer.classList.remove("dragging");
+      rail.classList.remove("dragging");
       document.body.classList.remove("resizing");
-      const w = getComputedStyle(document.documentElement).getPropertyValue("--inspector-w").trim();
-      if (w) localStorage.setItem(INSPECTOR_W_KEY, String(parseInt(w, 10)));
+      localStorage.setItem(o.storageKey, String(paneWidth(o.cssVar, o.defaultW)));
       // 折り返し位置は描画時のペイン幅で決まるので、離した時点で引き直す。
       if (state.mode === "graph") renderCenter();
     };
-    resizer.addEventListener("pointerdown", (e) => {
+    rail.addEventListener("pointerdown", (e) => {
       dragging = true;
-      resizer.classList.add("dragging");
+      rail.classList.add("dragging");
       document.body.classList.add("resizing");
-      resizer.setPointerCapture((e as PointerEvent).pointerId);
+      rail.setPointerCapture((e as PointerEvent).pointerId);
     });
-    resizer.addEventListener("pointermove", onMove as EventListener);
-    resizer.addEventListener("pointerup", stop);
-    resizer.addEventListener("pointercancel", stop);
-    // ダブルクリックで既定に戻す。掴んで動かした後に戻せないと不安なので。
-    resizer.addEventListener("dblclick", () => {
-      setInspectorWidth(INSPECTOR_W_DEFAULT);
-      localStorage.setItem(INSPECTOR_W_KEY, String(INSPECTOR_W_DEFAULT));
+    rail.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      apply(o.widthAt((e as PointerEvent).clientX), false);
+    });
+    rail.addEventListener("pointerup", stop);
+    rail.addEventListener("pointercancel", stop);
+    // 格納中はダブルクリックで開き、開いているときは既定に戻す。
+    rail.addEventListener("dblclick", () => {
+      apply(paneWidth(o.cssVar, o.defaultW) === 0 ? o.defaultW : o.defaultW, true);
       if (state.mode === "graph") renderCenter();
     });
-  }
+  };
+
+  setupPane({
+    id: "sidebar-resizer",
+    hideClass: "hide-sidebar",
+    cssVar: "--sidebar-w",
+    storageKey: "sirube.sidebarWidth",
+    defaultW: 220,
+    minW: 160,
+    widthAt: (x) => x,
+    otherW: () => paneWidth("--inspector-w", 320),
+  });
+  setupPane({
+    id: "inspector-resizer",
+    hideClass: "hide-inspector",
+    cssVar: "--inspector-w",
+    storageKey: "sirube.inspectorWidth",
+    defaultW: 320,
+    minW: 240,
+    widthAt: (x) => window.innerWidth - x,
+    otherW: () => paneWidth("--sidebar-w", 220),
+  });
 
   // グラフは描画時のペイン幅を測って折り返し位置を決めるため、ウィンドウを
   // 広げても畳んだままになる（2026-08-31 の実機確認で発見。幅は足りているのに
