@@ -74,7 +74,7 @@ const svg = SMALL
     <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke-width="2.3"/>
     <line x1="${x3}" y1="${y3}" x2="${x4}" y2="${y4}" stroke-width="2.3"/>
     <line x1="${x5}" y1="${y5}" x2="${x6}" y2="${y6}" stroke-width="2.3" stroke-dasharray="4.6 4.1"/>
-    <circle cx="${big.x}" cy="${big.y}" r="${big.r}" fill="${baseColor}" stroke-width="2.8"/>
+    <circle cx="${big.x}" cy="${big.y}" r="${big.r}" fill="${baseColor}" stroke="${baseColor}" stroke-width="2.8"/>
     <circle cx="${mid.x}" cy="${mid.y}" r="${mid.r}" stroke-width="2.6"/>
     <circle cx="${small.x}" cy="${small.y}" r="${small.r}" stroke-width="2.5"/>
   </g>
