@@ -1,0 +1,32 @@
+{
+  "name": "sirube",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "目的から「それには何が必要か」を辿ると、末端に今日できることが現れる。半年空けても、道は残っている。",
+  "scripts": {
+    "dev": "bun run src/dev/serve.ts",
+    "build:web": "bun run scripts/build-web.ts",
+    "tauri": "tauri",
+    "release": "cmd //c \"scripts\\with-msvc.bat bunx tauri build\" && bun run scripts/show-release.ts",
+    "icons": "bun run scripts/gen-icons.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-fs": "^2.5.1",
+    "js-yaml": "^4.1.0",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.12.0",
+    "@tauri-apps/cli": "^2.11.4",
+    "@types/bun": "latest",
+    "@types/js-yaml": "^4.0.9"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

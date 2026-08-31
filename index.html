@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sirube</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand" id="brand"></div>
+      <div class="search-wrap">
+        <span class="search-icon" id="search-icon"></span>
+        <input
+          id="search-input"
+          type="search"
+          placeholder="ノード名・本文を検索（空欄で「今やれること」）"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <button class="btn" id="reconcile-btn" type="button">自動解決</button>
+    </header>
+
+    <main class="app-body">
+      <aside class="sidebar">
+        <button class="nav-item" id="nav-actionable" type="button"></button>
+        <h2 class="sidebar-heading">目的</h2>
+        <div id="root-list" class="root-list"></div>
+      </aside>
+
+      <section class="center">
+        <nav class="breadcrumb" id="breadcrumb"></nav>
+        <div class="center-body" id="center-body"></div>
+      </section>
+
+      <aside class="inspector" id="inspector"></aside>
+    </main>
+
+    <div class="modal-backdrop hidden" id="modal-backdrop">
+      <div class="modal" id="modal"></div>
+    </div>
+
+    <div class="toast-stack" id="toast-stack"></div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
