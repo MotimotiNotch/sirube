@@ -151,6 +151,10 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
 
   interface PaneOpts {
     id: string;
+    /** 格納中に出す引き出しボタンの向き。しまった側から中央へ開く矢印にする。 */
+    openDir: "right" | "left";
+    /** 引き出しボタンの読み上げ名。 */
+    openLabel: string;
     /** 格納したときにパネル自体を消すための body クラス。列幅を0にしても
      * padding が残って数十pxの帯になるので、幅だけでは畳みきれない。 */
     hideClass: string;
@@ -191,6 +195,22 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
       document.body.classList.toggle(o.hideClass, saved === 0);
     }
 
+    // 格納すると 5px のレールしか残らず、そこに掴めるものがあると気づけない。
+    // しまった側から中央へ開く矢印を1つ置いて、押せば既定幅で戻るようにする。
+    const openBtn = h("button", { class: "rail-btn", type: "button" }) as HTMLButtonElement;
+    openBtn.setAttribute("aria-label", o.openLabel);
+    openBtn.title = o.openLabel;
+    openBtn.append(iconSpan("chevronRight", 14));
+    if (o.openDir === "left") openBtn.classList.add("flip");
+    // レールの pointerdown はドラッグ開始なので、ボタンの上では止める。
+    openBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+    openBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      apply(o.defaultW, true);
+      if (state.mode === "graph") renderCenter();
+    });
+    rail.append(openBtn);
+
     let dragging = false;
     const stop = (): void => {
       if (!dragging) return;
@@ -222,6 +242,8 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
 
   setupPane({
     id: "sidebar-resizer",
+    openDir: "right",
+    openLabel: "目的の一覧を開く",
     hideClass: "hide-sidebar",
     cssVar: "--sidebar-w",
     storageKey: "sirube.sidebarWidth",
@@ -232,6 +254,8 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
   });
   setupPane({
     id: "inspector-resizer",
+    openDir: "left",
+    openLabel: "詳細パネルを開く",
     hideClass: "hide-inspector",
     cssVar: "--inspector-w",
     storageKey: "sirube.inspectorWidth",

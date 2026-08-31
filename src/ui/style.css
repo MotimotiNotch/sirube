@@ -279,6 +279,36 @@ body.no-inspector .app-body {
 /* 格納中は境界が見えないと掴めないので、レールを少し強調しておく。
  * レール自体は消さない——消すと引き出す手段が無くなる。 */
 .resizer.collapsed { background: var(--border-strong); }
+
+/* 格納中だけ出る引き出しボタン。5px のレールでは「掴めるものがある」と
+ * 気づけないので、しまった側から中央へ開く矢印を1つ置く。
+ * レールより広いぶんは左右へ均等にはみ出させる（列幅は動かさない）。 */
+.rail-btn {
+  position: absolute;
+  top: 14px;
+  /* レール中央に置くと画面端で外側へはみ出して半分切れる（2026-08-31 に
+   * 実際に切れた）。格納側の縁に合わせて、中央ペイン側へだけはみ出させる。 */
+  left: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  cursor: pointer;
+  z-index: 2;
+}
+.resizer.collapsed .rail-btn { display: inline-flex; }
+.rail-btn:hover { color: var(--fg); background: var(--bg-sunken); }
+.rail-btn.flip {
+  left: auto;
+  right: 0;
+  transform: scaleX(-1);
+}
 .sidebar, .inspector { min-width: 0; }
 
 /* 畳んだパネルの潰し方。
