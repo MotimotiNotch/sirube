@@ -51,6 +51,18 @@ const baseColor = "#8cb3d9";
 // 意味の核（実線で辿る → 破線の先に点）は落とさない。
 const SMALL = process.argv.includes("--small");
 
+// OS のアプリアイコン用。`--plate` を付けると角丸の下地を敷いた版を出す。
+//
+// アプリ内なら currentColor で明暗どちらにも乗るが、タスクバーや Explorer は
+// 背景を選べない。透過＋濃いインクのまま渡すと、ダークテーマのタスクバーで
+// 線がほぼ消える。下地を1枚敷けばどこに置いても同じ見え方になる。
+// 図そのものは触らない（`assets/app-icon.svg` と同一の座標・色）。
+const PLATE = process.argv.includes("--plate");
+const PLATE_BG = "#f5f3ef"; // アプリのライト側の紙色に寄せたオフホワイト
+const plateRect = PLATE
+  ? `  <rect x="0" y="0" width="${VB}" height="${VB}" rx="13.5" fill="${PLATE_BG}"/>\n`
+  : "";
+
 // ink は currentColor。単体で開いたときのために svg の color で既定を持たせる。
 // アプリに埋め込むと CSS の color を継ぐので、明暗どちらでも成立する。
 const svg = SMALL
@@ -61,7 +73,7 @@ const svg = SMALL
       const d = { x: 48, y: 15, r: 7.4 };
       const [p1, p2, p3, p4] = edge(c, d, 1.4);
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB} ${VB}" width="${VB}" height="${VB}" color="#1c1c1a" fill="none" role="img" aria-label="Sirube">
-  <g stroke="currentColor" stroke-linecap="round">
+${plateRect}  <g stroke="currentColor" stroke-linecap="round">
     <line x1="${p1}" y1="${p2}" x2="${p3}" y2="${p4}" stroke-width="3.8" stroke-dasharray="4 4.2"/>
     <circle cx="${c.x}" cy="${c.y}" r="${c.r}" stroke-width="4.4"/>
   </g>
@@ -70,7 +82,7 @@ const svg = SMALL
 `;
     })()
   : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB} ${VB}" width="${VB}" height="${VB}" color="#1c1c1a" fill="none" role="img" aria-label="Sirube">
-  <g stroke="currentColor" stroke-linecap="round">
+${plateRect}  <g stroke="currentColor" stroke-linecap="round">
     <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke-width="2.3"/>
     <line x1="${x3}" y1="${y3}" x2="${x4}" y2="${y4}" stroke-width="2.3"/>
     <line x1="${x5}" y1="${y5}" x2="${x6}" y2="${y6}" stroke-width="2.3" stroke-dasharray="4.6 4.1"/>
@@ -82,7 +94,7 @@ const svg = SMALL
 </svg>
 `;
 
-const out = SMALL ? "assets/app-icon-small.svg" : "assets/app-icon.svg";
+const out = PLATE ? "assets/app-icon-plate.svg" : SMALL ? "assets/app-icon-small.svg" : "assets/app-icon.svg";
 
 await Bun.write(out, svg);
 console.log(`${out} を書き出しました（accent ${accent}）`);
