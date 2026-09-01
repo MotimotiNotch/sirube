@@ -42,7 +42,8 @@ while IFS= read -r line; do
 done <<< "$_msvc_dump"
 
 # cargo / rustup も通しておく（rustup は既定で ~/.cargo/bin に入る）。
-export PATH="$PATH:/c/Users/monof/.cargo/bin"
+# 個人のユーザー名を焼き付けない（clone した人の手元で必ず外れるため）。
+export PATH="$PATH:${CARGO_HOME:-$USERPROFILE/.cargo}/bin"
 
 if command -v link.exe >/dev/null 2>&1 || [ -n "${VCToolsInstallDir:-}" ]; then
   echo "MSVC 環境を読み込みました（VCTools: ${VCToolsInstallDir:-不明}）"

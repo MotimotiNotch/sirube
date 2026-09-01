@@ -1,0 +1,38 @@
+name: CI
+
+# 型チェックとテスト。Rust 側（Tauri シェル）はここでは触らない——
+# ビルドは MSVC の環境変数を通す必要があり Windows ランナー前提になるうえ、
+# 壊れるのはほぼ TS 側なので、速く回るこちらを常時回す方が実利がある。
+# 配布物を作るときは手元で `bun run release`。
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    name: Typecheck, test (TypeScript/Bun)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          # 手元と揃える。テストは happy-dom 上で DOM を組むので、
+          # ランタイムが変わると落ち方まで変わる。
+          bun-version: "1.4.0"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test

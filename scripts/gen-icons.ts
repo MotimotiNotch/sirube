@@ -1,6 +1,10 @@
 // Lucide の公式 SVG を `src/ui/icons.ts` に取り込む生成スクリプト。
 // 追加したいアイコンは NAMES に足して `bun run scripts/gen-icons.ts` を実行する。
-// 取得済み SVG は %TEMP%/lucide-<name>.svg に置いてある想定（curl で取る）。
+//
+// 上流から直接取る。以前は「%TEMP%/lucide-<name>.svg に curl で落としてある想定」
+// だったが、(1) 手順が暗黙で、置き忘れると壊れた icons.ts が出る (2) 取得先の絶対
+// パスに個人のユーザー名が入る (3) そもそも curl が通らない環境がある、の3つが
+// 重なっていた。fetch なら手順は1つで済む。
 
 const NAMES = [
   "compass", "search", "circle-check", "circle", "circle-slash", "repeat",
@@ -8,6 +12,19 @@ const NAMES = [
   "triangle-alert", "wand-sparkles", "list-checks", "pencil", "arrow-left",
   "folder-open",
 ];
+
+const SOURCE = "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons";
+
+async function fetchIcon(name: string): Promise<string> {
+  const res = await fetch(`${SOURCE}/${name}.svg`);
+  // 404 の本文をそのまま SVG として埋め込むと、画面には何も出ないのにビルドは
+  // 通る、という一番気付きにくい壊れ方をする。ここで止める。
+  if (!res.ok) throw new Error(`${name}: ${res.status} ${res.statusText}`);
+  return (await res.text())
+    .trim()
+    .replace(/\s*\n\s*/g, " ")
+    .replace(/>\s+</g, "><");
+}
 
 const camel = (s: string): string => s.replace(/-(.)/g, (_, c: string) => c.toUpperCase());
 
@@ -22,13 +39,10 @@ const header = [
 ].join("\n");
 
 let out = header + "\n";
-for (const n of NAMES) {
-  const svg = (await Bun.file(`C:/Users/monof/AppData/Local/Temp/lucide-${n}.svg`).text())
-    .trim()
-    .replace(/\s*\n\s*/g, " ")
-    .replace(/>\s+</g, "><");
-  out += `  ${JSON.stringify(camel(n))}: ${JSON.stringify(svg)},\n`;
-}
+const svgs = await Promise.all(NAMES.map(fetchIcon));
+NAMES.forEach((n, i) => {
+  out += `  ${JSON.stringify(camel(n))}: ${JSON.stringify(svgs[i])},\n`;
+});
 
 const footer = [
   "} as const;",
