@@ -11,12 +11,12 @@
 // その迷いが分解の流れを止める。
 
 import {
+  analyzeCycles,
   blockedByCycle,
-  cyclicNodes,
-  findCycles,
   inDegree,
   neighbors,
   resolveState,
+  type CycleInfo,
   type Neighbors,
   type ReverseIndex,
 } from "./engine.ts";
@@ -30,6 +30,11 @@ export interface SearchOptions {
   /** 隣接を何ホップまで出すか。既定は 1（0 で隣接なし）。 */
   neighborDepth?: 0 | 1;
   limit?: number;
+  /** 呼び出し側が既に持っている循環の解析結果。省略すると内部で計算する。
+   *
+   * 1回の描画でサイドバーと中央が別々に検索を投げるため、渡さないと
+   * Tarjan が描画のたびに何度も走る。UI は `AppState` に1つ持っている。 */
+  cycles?: CycleInfo;
 }
 
 export interface SearchHit {
@@ -72,7 +77,7 @@ export function ancestorRoots(g: Graph, id: string, rev: ReverseIndex, seen = ne
 export function search(g: Graph, rev: ReverseIndex, opts: SearchOptions = {}): SearchResult {
   const { query = "", states, neighborDepth = 1, limit } = opts;
   const needle = query.normalize("NFKC").trim().toLowerCase();
-  const cyclic = cyclicNodes(g);
+  const { cycles, cyclic } = opts.cycles ?? analyzeCycles(g);
 
   const hits: SearchHit[] = [];
   for (const [id, node] of Object.entries(g.nodes)) {
@@ -110,13 +115,31 @@ export function search(g: Graph, rev: ReverseIndex, opts: SearchOptions = {}): S
   return {
     hits: limit === undefined ? hits : hits.slice(0, limit),
     total,
-    cycles: findCycles(g),
+    cycles,
   };
 }
 
 /** 横断 Next Action ビュー。検索の特殊形（空クエリ + ACTIONABLE）。 */
-export function nextActions(g: Graph, rev: ReverseIndex, limit?: number): SearchResult {
-  return search(g, rev, { states: ["ACTIONABLE"], neighborDepth: 1, ...(limit !== undefined ? { limit } : {}) });
+export function nextActions(
+  g: Graph,
+  rev: ReverseIndex,
+  opts: { limit?: number; cycles?: CycleInfo } = {},
+): SearchResult {
+  return search(g, rev, { states: ["ACTIONABLE"], neighborDepth: 1, ...opts });
+}
+
+/** 「今やれること」の件数だけを数える。サイドバーのバッジ用。
+ *
+ * バッジに要るのは数だけなのに `nextActions().total` を読むと、全ヒットの
+ * 祖先辿りと隣接収集まで走ってしまう。描画のたびに検索が丸ごと2回動く形に
+ * なるため、数えるだけの経路を分けてある。 */
+export function countActionable(g: Graph, cycles?: CycleInfo): number {
+  const { cyclic } = cycles ?? analyzeCycles(g);
+  let count = 0;
+  for (const id of Object.keys(g.nodes)) {
+    if (resolveState(g, id, cyclic) === "ACTIONABLE") count += 1;
+  }
+  return count;
 }
 
 export interface StuckReport {
@@ -134,10 +157,8 @@ export interface StuckReport {
  * まずい失敗の仕方。実測でも、輪が1つあるだけで ACTIONABLE がほぼ消え、
  * 理由が一切表示されないことを確認している。
  */
-export function stuckReport(g: Graph): StuckReport {
-  const cycles = findCycles(g);
-  const cyclic = new Set<string>();
-  for (const c of cycles) for (const id of c) cyclic.add(id);
+export function stuckReport(g: Graph, info?: CycleInfo): StuckReport {
+  const { cycles, cyclic } = info ?? analyzeCycles(g);
   const blocked = Object.keys(g.nodes)
     .filter((id) => !g.nodes[id]!.satisfied && blockedByCycle(g, id, cyclic))
     .sort();

@@ -101,11 +101,28 @@ export function findCycles(g: Graph): string[][] {
   return result;
 }
 
+/** 循環の解析結果をまとめた持ち回り用の値。
+ *
+ * 成分の一覧（「割れ」の告知に使う）と、それを平らにした集合
+ * （`resolveState` に渡すと再計算を避けられる）は常に対で要る。別々に
+ * 取ると Tarjan が2回走るため、1回の走査から両方を作って持ち回る。 */
+export interface CycleInfo {
+  /** 成分ごとのノード id 配列。 */
+  cycles: string[][];
+  /** 上を平らにした集合。 */
+  cyclic: Set<string>;
+}
+
+export function analyzeCycles(g: Graph): CycleInfo {
+  const cycles = findCycles(g);
+  const cyclic = new Set<string>();
+  for (const cycle of cycles) for (const id of cycle) cyclic.add(id);
+  return { cycles, cyclic };
+}
+
 /** 循環上にいるノードの集合。`resolveState` に渡すと再計算を避けられる。 */
 export function cyclicNodes(g: Graph): Set<string> {
-  const set = new Set<string>();
-  for (const cycle of findCycles(g)) for (const id of cycle) set.add(id);
-  return set;
+  return analyzeCycles(g).cyclic;
 }
 
 // ---------------------------------------------------------------------------

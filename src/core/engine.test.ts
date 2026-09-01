@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseDsl, parseBulkRequires, buildBulkRequiresDsl } from "./dsl.ts";
 import {
+  analyzeCycles,
   buildReverseIndex,
   cyclicNodes,
   findCycles,
@@ -12,7 +13,7 @@ import {
   toggleSatisfied,
 } from "./engine.ts";
 import { newGraph, type Graph } from "./model.ts";
-import { nextActions, search, stuckReport } from "./search.ts";
+import { countActionable, nextActions, search, stuckReport } from "./search.ts";
 
 /** DSL からテスト用グラフを組む。mtime は 0。 */
 function g(dsl: string): Graph {
@@ -235,5 +236,35 @@ describe("検索", () => {
     const graph = g("引っ越し -> 家 -> 不動産, 確定申告 -> 領収書整理");
     const rev = buildReverseIndex(graph);
     expect(nextActions(graph, rev).hits.map((h) => h.id).sort()).toEqual(["不動産", "領収書整理"].sort());
+  });
+});
+
+describe("循環解析の使い回し", () => {
+  const dsl = `実績を作る -> 案件を取る -> 実績を作る,
+               ポートフォリオを公開する -> 実績を作る,
+               確定申告 -> 領収書整理`;
+
+  test("analyzeCycles は findCycles / cyclicNodes と同じものを1回で返す", () => {
+    const graph = g(dsl);
+    const info = analyzeCycles(graph);
+    expect(info.cycles).toEqual(findCycles(graph));
+    expect([...info.cyclic].sort()).toEqual([...cyclicNodes(graph)].sort());
+  });
+
+  test("外から渡した循環解析でも結果が変わらない", () => {
+    const graph = g(dsl);
+    const rev = buildReverseIndex(graph);
+    const info = analyzeCycles(graph);
+    expect(search(graph, rev, { cycles: info })).toEqual(search(graph, rev));
+    expect(nextActions(graph, rev, { cycles: info })).toEqual(nextActions(graph, rev));
+    expect(stuckReport(graph, info)).toEqual(stuckReport(graph));
+  });
+
+  test("バッジの件数は横断ビューの件数と一致する", () => {
+    // 数えるだけの経路を分けたので、検索本体と答えがずれないことを固定する。
+    const graph = g(dsl);
+    const rev = buildReverseIndex(graph);
+    expect(countActionable(graph)).toBe(nextActions(graph, rev).total);
+    expect(countActionable(graph, analyzeCycles(graph))).toBe(1);
   });
 });

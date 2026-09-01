@@ -3,10 +3,10 @@
 // サーバは無い。ストアもエンジンもここ（フロント）で動き、ファイルアクセスだけ
 // `SirubeFs` の実装を差し替える（開発中はメモリ、Tauri ではプラグイン fs）。
 
-import { buildReverseIndex, cyclicNodes, progress, resolveState, roots, type ReverseIndex } from "../core/engine.ts";
+import { analyzeCycles, buildReverseIndex, progress, resolveState, roots, type CycleInfo, type ReverseIndex } from "../core/engine.ts";
 import type { Graph } from "../core/model.ts";
 import { planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
-import { nextActions, search } from "../core/search.ts";
+import { countActionable, nextActions, search } from "../core/search.ts";
 import type { SirubeFs } from "../store/fs.ts";
 import { MarkdownGraphStore } from "../store/store.ts";
 import { clear, el, h, iconSpan, stateDot, toast } from "./dom.ts";
@@ -17,7 +17,9 @@ import { renderList } from "./list-view.ts";
 interface AppState {
   graph: Graph;
   rev: ReverseIndex;
-  cyclic: Set<string>;
+  /** 循環の解析（成分＋集合）。描画のたびに Tarjan を回さないよう、
+   *  ここで1つ持って検索・グラフ・インスペクタへ配る。 */
+  cycles: CycleInfo;
   mode: "list" | "graph";
   focusId?: string;
   selectedId?: string;
@@ -42,7 +44,7 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
   const state: AppState = {
     graph,
     rev: buildReverseIndex(graph),
-    cyclic: cyclicNodes(graph),
+    cycles: analyzeCycles(graph),
     mode: "list",
     query: "",
     trail: [],
@@ -55,7 +57,7 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
   // ---- 再計算 ------------------------------------------------------------
   const recompute = (): void => {
     state.rev = buildReverseIndex(state.graph);
-    state.cyclic = cyclicNodes(state.graph);
+    state.cycles = analyzeCycles(state.graph);
   };
 
   // ---- ヘッダー ----------------------------------------------------------
@@ -405,7 +407,7 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
 
   // ---- 描画 --------------------------------------------------------------
   const renderSidebar = (): void => {
-    const actionableCount = nextActions(state.graph, state.rev).total;
+    const actionableCount = countActionable(state.graph, state.cycles);
     const nav = el<HTMLButtonElement>("nav-actionable");
     nav.replaceChildren();
     nav.className = `nav-item${state.mode === "list" && state.query === "" ? " active" : ""}`;
@@ -430,7 +432,7 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
         class: `root-item${state.mode === "graph" && (state.trail[0] ?? state.focusId) === id ? " active" : ""}`,
         type: "button",
       });
-      btn.append(stateDot(resolveState(state.graph, id, state.cyclic)));
+      btn.append(stateDot(resolveState(state.graph, id, state.cycles.cyclic)));
       btn.append(h("span", {}, [state.graph.nodes[id]?.name ?? id]));
       btn.append(h("span", { class: "count" }, [`${p.done}/${p.total}`]));
       btn.addEventListener("click", () => focusFresh(id));
@@ -470,13 +472,13 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
   const renderCenter = (): void => {
     const body = el("center-body");
     if (state.mode === "graph" && state.focusId) {
-      renderGraph(body, state.graph, state.focusId, state.rev, state.cyclic, { onSelect: select, onDrill: drill });
+      renderGraph(body, state.graph, state.focusId, state.rev, state.cycles.cyclic, { onSelect: select, onDrill: drill });
       return;
     }
     const result =
       state.query === ""
-        ? nextActions(state.graph, state.rev)
-        : search(state.graph, state.rev, { query: state.query });
+        ? nextActions(state.graph, state.rev, { cycles: state.cycles })
+        : search(state.graph, state.rev, { query: state.query, cycles: state.cycles });
     renderList(
       body,
       state.graph,
@@ -500,7 +502,7 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
     renderSidebar();
     renderBreadcrumb();
     renderCenter();
-    renderInspector(el("inspector"), state.graph, state.selectedId, state.rev, state.cyclic, {
+    renderInspector(el("inspector"), state.graph, state.selectedId, state.rev, state.cycles.cyclic, {
       onToggle: (id) => void toggle(id),
       onSelect: select,
       onDrill: drill,
