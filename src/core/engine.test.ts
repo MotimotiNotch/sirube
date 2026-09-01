@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { parseDsl, parseBulkRequires, buildBulkRequiresDsl } from "./dsl.ts";
 import {
   analyzeCycles,
+  blockedByCycle,
   buildReverseIndex,
   cyclicNodes,
   findCycles,
@@ -97,6 +98,49 @@ describe("循環", () => {
     expect(actionable).toEqual(["知人に声をかける", "領収書整理"]);
     // 分解は情報を壊していない: 実績ができるまで大きい案件は取れないまま。
     expect(resolveState(graph, "大きい案件を取る")).toBe("BLOCKED");
+  });
+});
+
+describe("contains も「何が必要か」として数える", () => {
+  test("contains だけ持つ中間ノードは、子が未完了なら BLOCKED", () => {
+    // requires しか見ていなかった頃は「前提ゼロ＝今やれる」と誤判定していた。
+    const graph = g("MVP実装完了 -> [Markdownノードストア] -> [検索と横断ビュー]");
+    expect(graph.nodes["MVP実装完了"]!.requires).toEqual([]);
+    expect(graph.nodes["MVP実装完了"]!.contains.length).toBe(2);
+    expect(resolveState(graph, "MVP実装完了")).toBe("BLOCKED");
+  });
+
+  test("子が全部揃えば ACTIONABLE（カスケードが閉じる直前の状態）", () => {
+    const graph = g("MVP実装完了 -> [Markdownノードストア] -> [検索と横断ビュー]");
+    graph.nodes["Markdownノードストア"]!.satisfied = true;
+    expect(resolveState(graph, "MVP実装完了")).toBe("BLOCKED"); // まだ片方
+    graph.nodes["検索と横断ビュー"]!.satisfied = true;
+    expect(resolveState(graph, "MVP実装完了")).toBe("ACTIONABLE");
+  });
+
+  test("requires と contains の両方を持つノードは両方揃うまで BLOCKED", () => {
+    const graph = g("MVP実装完了 -> vault選択の作り直し, MVP実装完了 -> [Tauriシェル]");
+    graph.nodes["vault選択の作り直し"]!.satisfied = true;
+    expect(resolveState(graph, "MVP実装完了")).toBe("BLOCKED"); // contains が残っている
+    graph.nodes["Tauriシェル"]!.satisfied = true;
+    expect(resolveState(graph, "MVP実装完了")).toBe("ACTIONABLE");
+  });
+
+  test("横断 Next Action ビューに中間ノードが紛れ込まない", () => {
+    // 一般版の本体機能。ここに親が出ると「今やれること」が嘘になる。
+    const graph = g("MVP実装完了 -> [Markdownノードストア] -> [検索と横断ビュー], 確定申告 -> 領収書整理");
+    const rev = buildReverseIndex(graph);
+    const ids = nextActions(graph, rev).hits.map((h) => h.id).sort();
+    expect(ids).toEqual(["Markdownノードストア", "検索と横断ビュー", "領収書整理"].sort());
+    expect(ids).not.toContain("MVP実装完了");
+  });
+
+  test("contains 越しの輪も「詰まっている理由」として拾える", () => {
+    // 理由が出せないと、半年ぶりに開いて空だったときに絶望する。
+    const graph = g("MVP実装完了 -> [案件を取る], 実績を作る -> 案件を取る -> 実績を作る");
+    const info = analyzeCycles(graph);
+    expect(blockedByCycle(graph, "MVP実装完了", info.cyclic)).toBe(true);
+    expect(stuckReport(graph).blockedByCycles).toContain("MVP実装完了");
   });
 });
 

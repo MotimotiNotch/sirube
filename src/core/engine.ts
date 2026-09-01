@@ -148,8 +148,17 @@ function isOnCycle(g: Graph, start: string): boolean {
  *
  * - `satisfied` が立っていれば `SATISFIED`
  * - 自分が循環上にいれば `CYCLIC`（前提待ちと区別する）
- * - `requires` が空、または全部 `SATISFIED` なら `ACTIONABLE`
+ * - `requires` と `contains` が空、または全部 `SATISFIED` なら `ACTIONABLE`
  * - それ以外は `BLOCKED`
+ *
+ * `contains` も見る理由: 2種類のエッジは**どちらも「何が必要か」**を表して
+ * おり、違うのは完了の伝わる向きだけ（`requires` は上へ遡及、`contains` は
+ * 下から集約）。「今やれるか」を問う側から見れば区別は無い。`requires` しか
+ * 見ないと、子が1つも終わっていない中間ノード（`MVP実装完了` など）が
+ * 「前提ゼロ＝今やれる」と判定され、横断 Next Action ビューに紛れ込む。
+ * 判別基準（必要なものが揃ったあと、まだ自分でやることが残っているか）で
+ * 言えば `contains` の親には固有の作業が無いので、そもそも「今やれること」
+ * には出てはいけない。
  *
  * `cyclic` を渡すと循環判定を再計算しない。多数のノードを一度に
  * 評価するとき（検索・横断ビュー）は `cyclicNodes()` の結果を渡す。
@@ -168,12 +177,17 @@ export function resolveState(
   if (onCycle) return "CYCLIC";
 
   if (stack.has(nodeId)) return "BLOCKED"; // 保険のサイクルガード
-  if (node.requires.length === 0) return "ACTIONABLE";
+  if (node.requires.length === 0 && node.contains.length === 0) return "ACTIONABLE";
 
+  // 配列を結合せず2周するのは、ここが検索・横断ビューで全ノード分回る
+  // ホットパスのため。
   const next = new Set(stack);
   next.add(nodeId);
   for (const reqId of node.requires) {
     if (resolveState(g, reqId, cyclic, next) !== "SATISFIED") return "BLOCKED";
+  }
+  for (const childId of node.contains) {
+    if (resolveState(g, childId, cyclic, next) !== "SATISFIED") return "BLOCKED";
   }
   return "ACTIONABLE";
 }
@@ -186,13 +200,16 @@ export function resolveState(
 export function blockedByCycle(g: Graph, nodeId: string, cyclic: ReadonlySet<string>): boolean {
   if (cyclic.has(nodeId)) return false; // 自分が輪の上なら CYCLIC であって BLOCKED ではない
   const seen = new Set<string>();
-  const stack = [...(g.nodes[nodeId]?.requires ?? [])];
+  // `resolveState` が両方のエッジを見る以上、こちらも両方辿らないと
+  // 「なぜ止まっているのか」を取りこぼす。輪の上にいる孫を `contains` で
+  // 抱えた親が、理由の分からない BLOCKED として残ってしまう。
+  const stack = [...(g.nodes[nodeId]?.requires ?? []), ...(g.nodes[nodeId]?.contains ?? [])];
   while (stack.length > 0) {
     const cur = stack.pop()!;
     if (cyclic.has(cur)) return true;
     if (seen.has(cur)) continue;
     seen.add(cur);
-    stack.push(...(g.nodes[cur]?.requires ?? []));
+    stack.push(...(g.nodes[cur]?.requires ?? []), ...(g.nodes[cur]?.contains ?? []));
   }
   return false;
 }
