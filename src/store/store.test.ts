@@ -4,6 +4,7 @@ import { resolveState } from "../core/engine.ts";
 import { MemoryFs } from "./fs.ts";
 import { parseNodeFile, serializeNodeFile, splitFrontmatter } from "./frontmatter.ts";
 import { MarkdownGraphStore } from "./store.ts";
+import { isUlid } from "../core/ulid.ts";
 
 const md = (fm: string, body = "") => `---\n${fm}\n---\n${body ? `\n${body}\n` : ""}`;
 
@@ -102,10 +103,15 @@ describe("ストア", () => {
 
     const res = await store.addBulkRequires(graph, "引っ越し", "引っ越し先の家\nお金を貯める");
     expect(res.errors).toEqual([]);
-    expect(res.created.sort()).toEqual(["お金を貯める", "引っ越し先の家"].sort());
+    // 作られるのは採番された id で、書いた名前は `name` に入る。
+    expect(res.created).toHaveLength(2);
+    for (const id of res.created) expect(isUlid(id)).toBe(true);
+    expect(res.created.map((id) => graph.nodes[id]!.name).sort()).toEqual(
+      ["お金を貯める", "引っ越し先の家"].sort(),
+    );
     expect(graph.nodes["引っ越し"]!.satisfied).toBe(true);
     expect(graph.nodes["引っ越し"]!.note).toBe("3月中にやる");
-    expect(graph.nodes["引っ越し"]!.requires.sort()).toEqual(["お金を貯める", "引っ越し先の家"].sort());
+    expect(graph.nodes["引っ越し"]!.requires.sort()).toEqual(res.created.sort());
   });
 
   test("ノード削除は参照側からもエッジを外す", async () => {

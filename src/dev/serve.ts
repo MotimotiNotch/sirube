@@ -132,6 +132,15 @@ const server = Bun.serve({
           await writeFile(nodePath(id), await req.text(), "utf8");
           return new Response("ok");
         }
+        if (req.method === "POST") {
+          // 排他作成。`wx` は既に在れば EEXIST で失敗する。
+          try {
+            await writeFile(nodePath(id), await req.text(), { encoding: "utf8", flag: "wx" });
+          } catch {
+            return new Response("already exists", { status: 409 });
+          }
+          return new Response("ok");
+        }
         if (req.method === "DELETE") {
           await unlink(nodePath(id));
           return new Response("ok");

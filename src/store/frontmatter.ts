@@ -24,6 +24,7 @@
 
 import yaml from "js-yaml";
 import { NodeFrontmatterSchema, newNode, type Node } from "../core/model.ts";
+import { isUlid } from "../core/ulid.ts";
 
 const FENCE = "---";
 
@@ -93,6 +94,7 @@ export function parseNodeFile(id: string, text: string, mtimeMs: number): ParseN
         // 正しい、というケースで前提関係まで失いたくない）。
         const loose = frontmatter as Record<string, unknown>;
         return {
+          name: typeof loose?.name === "string" ? loose.name : undefined,
           satisfied: typeof loose?.satisfied === "boolean" ? loose.satisfied : false,
           requires: asStringArray(loose?.requires),
           contains: asStringArray(loose?.contains),
@@ -101,6 +103,9 @@ export function parseNodeFile(id: string, text: string, mtimeMs: number): ParseN
       })();
 
   const node = newNode(id, mtimeMs);
+  // 名前が無ければファイル名を名前として使う。移行前の vault はこれで動く。
+  const name = fm.name?.trim();
+  if (name !== undefined && name !== "") node.name = name;
   node.satisfied = fm.satisfied;
   node.requires = dedupe(fm.requires);
   node.contains = dedupe(fm.contains);
@@ -118,21 +123,46 @@ function dedupe(arr: string[]): string[] {
   return [...new Set(arr.map((s) => s.trim()).filter(Boolean))];
 }
 
-/** Node → ファイル内容。キー順を固定して git diff を安定させる。 */
-export function serializeNodeFile(node: Node): string {
-  const fm: Record<string, unknown> = {
-    satisfied: node.satisfied,
-    requires: node.requires,
-    contains: node.contains,
-  };
+/** 配列要素の ULID に `# 名前` を添える。人名のまま書かれている要素には付けない
+ * （`- 領収書整理  # 領収書整理` はただのノイズなので）。 */
+function annotate(yamlText: string, nameOf?: (id: string) => string | undefined): string {
+  if (nameOf === undefined) return yamlText;
+  return yamlText.replace(/^(\s+- )(\S+)$/gm, (line, indent: string, value: string) => {
+    if (!isUlid(value)) return line;
+    const name = nameOf(value);
+    if (name === undefined || name === "" || name === value) return line;
+    // 改行を含む名前は YAML を壊すので1行に潰す。表示のためのコメントなので
+    // 情報が多少落ちても構わない。
+    const oneLine = name.split("\n").join(" ").split("\r").join(" ");
+    return `${indent}${value}  # ${oneLine}`;
+  });
+}
+
+/** Node → ファイル内容。キー順を固定して git diff を安定させる。
+ *
+ * `nameOf` を渡すと、`requires` / `contains` の id にコメントで名前を添える。
+ * id が ULID になると `- 01J8X2...` だけでは何のことか分からず、Markdown を
+ * 手で編集できるという前提が崩れるため。毎回書き直すので古くならないし、
+ * YAML のコメントは読み側が読み飛ばすので往復しても消えるだけ。 */
+export function serializeNodeFile(node: Node, nameOf?: (id: string) => string | undefined): string {
+  const fm: Record<string, unknown> = {};
+  // 名前が id と同じなら書かない。移行前の vault のファイルを無意味に
+  // 書き換えないための判断で、読み側は名前が無ければ id を名前として使う。
+  if (node.name !== node.id) fm.name = node.name;
+  fm.satisfied = node.satisfied;
+  fm.requires = node.requires;
+  fm.contains = node.contains;
   if (node.due !== undefined && node.due !== "") fm.due = node.due;
 
-  const yamlText = yaml.dump(fm, {
-    schema: yaml.CORE_SCHEMA, // 読み側と揃える。日付を余計にクォートしない
-    sortKeys: false,
-    lineWidth: -1, // 折り返さない。長いノード名が途中で折れると diff が読みにくい
-    noRefs: true,
-  });
+  const yamlText = annotate(
+    yaml.dump(fm, {
+      schema: yaml.CORE_SCHEMA, // 読み側と揃える。日付を余計にクォートしない
+      sortKeys: false,
+      lineWidth: -1, // 折り返さない。長いノード名が途中で折れると diff が読みにくい
+      noRefs: true,
+    }),
+    nameOf,
+  );
 
   const body = node.note.trim();
   return `${FENCE}\n${yamlText}${FENCE}\n${body ? `\n${body}\n` : ""}`;

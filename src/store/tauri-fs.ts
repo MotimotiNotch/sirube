@@ -52,6 +52,12 @@ export class TauriFs implements SirubeFs {
     await writeTextFile(nodePath(this.vaultPath, id), content);
   }
 
+  async createNode(id: string, content: string): Promise<void> {
+    // `createNew` は「既に在れば失敗する」排他作成。確認と作成が1操作なので、
+    // その間に他所から同じ名前が作られる隙間が無い。
+    await writeTextFile(nodePath(this.vaultPath, id), content, { createNew: true });
+  }
+
   async deleteNode(id: string): Promise<void> {
     await remove(nodePath(this.vaultPath, id));
   }

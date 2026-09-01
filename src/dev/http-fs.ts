@@ -37,6 +37,16 @@ export class HttpFs implements SirubeFs {
     if (!res.ok) throw new Error(`write failed: ${id}`);
   }
 
+  async createNode(id: string, content: string): Promise<void> {
+    // POST は排他作成。既に在れば 409 を返す。
+    const res = await fetch(`${this.base}/node/${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: { "content-type": "text/plain; charset=utf-8" },
+      body: content,
+    });
+    if (!res.ok) throw new Error(`create failed: ${id} (${res.status})`);
+  }
+
   async deleteNode(id: string): Promise<void> {
     const res = await fetch(`${this.base}/node/${encodeURIComponent(id)}`, { method: "DELETE" });
     if (!res.ok && res.status !== 404) throw new Error(`delete failed: ${id}`);

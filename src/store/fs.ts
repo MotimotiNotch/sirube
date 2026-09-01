@@ -20,6 +20,12 @@ export interface SirubeFs {
   listNodes(): Promise<NodeFileEntry[]>;
   readNode(id: string): Promise<string>;
   writeNode(id: string, content: string): Promise<void>;
+  /** 新規作成専用。**既に在れば必ず失敗する。**
+   *
+   * 「在るか確認してから書く」の2段だと、確認と書き込みの間に隙間ができる。
+   * id の重複を受け止める場所をここ1箇所にしておくと、乱数の衝突も、時計の
+   * 巻き戻りも、ファイルを手でコピーした結果も、同じ経路で弾ける。 */
+  createNode(id: string, content: string): Promise<void>;
   deleteNode(id: string): Promise<void>;
   /** 書き込み直後の mtime を取り直すため。 */
   statNode(id: string): Promise<number>;
@@ -75,6 +81,10 @@ export class MemoryFs implements SirubeFs {
     return f.content;
   }
   async writeNode(id: string, content: string): Promise<void> {
+    this.files.set(id, { content, mtimeMs: this.tick() });
+  }
+  async createNode(id: string, content: string): Promise<void> {
+    if (this.files.has(id)) throw new Error(`既に存在します: ${id}`);
     this.files.set(id, { content, mtimeMs: this.tick() });
   }
   async deleteNode(id: string): Promise<void> {

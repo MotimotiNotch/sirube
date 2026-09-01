@@ -27,6 +27,10 @@ import { z } from "zod";
  * 「ファイルは読めるが値が変」を「ファイルが壊れている」に
  * 格上げしない（1ノードの欠損でグラフ全体を落とさないため）。 */
 export const NodeFrontmatterSchema = z.object({
+  /** 表示名。ファイル名（id）が意味を持たない ULID になったので、人が読む
+   * 名前はここに置く。省略されていればファイル名を名前として扱う——
+   * 移行前の vault と、手で作られたファイルを、そのまま読めるようにするため。 */
+  name: z.string().optional(),
   satisfied: z.boolean().default(false),
   requires: z.array(z.string()).default([]),
   contains: z.array(z.string()).default([]),
@@ -39,10 +43,14 @@ export type NodeFrontmatter = z.infer<typeof NodeFrontmatterSchema>;
 
 /** メモリ上のノード。`id` はファイル名（拡張子なし）そのもの。
  *
- * `name` は `id` と同じ値を持つ冗長なフィールドに見えるが、UI 側が
- * 「表示名」として参照する口を1つに固定しておくために残している
- * （将来ファイル名と表示名を分ける余地も残る）。改名はファイルの
- * リネームで行う——Obsidian と同じ挙動。
+ * **id はファイル名にしか置かない。** frontmatter に `id:` を書くと2箇所に
+ * 同じものを持つことになり、ずれたときに正が決まらなくなる。1箇所に寄せて
+ * あるおかげで、ノードファイルを手でコピーしてもファイルシステムが同名を
+ * 拒み、2台の vault を git でマージしても add/add コンフリクトになる——
+ * どちらも id の重複が自動的に検出される。
+ *
+ * `name` は表示名で、frontmatter の `name` から読む（無ければ id）。
+ * 改名は `name` の1行を書き換えるだけで済み、参照は id のままなので切れない。
  *
  * `mtimeMs` はファイルシステム由来で、ファイルには書かれない。
  * 整合性の自動解決が「変更時刻の新しい方を正とする」ために使う。
