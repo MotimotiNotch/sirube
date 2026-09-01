@@ -6,6 +6,7 @@ const NAMES = [
   "compass", "search", "circle-check", "circle", "circle-slash", "repeat",
   "plus", "trash-2", "chevron-right", "x", "corner-down-right", "layers",
   "triangle-alert", "wand-sparkles", "list-checks", "pencil", "arrow-left",
+  "folder-open",
 ];
 
 const camel = (s: string): string => s.replace(/-(.)/g, (_, c: string) => c.toUpperCase());

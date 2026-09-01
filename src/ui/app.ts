@@ -5,7 +5,7 @@
 
 import { analyzeCycles, buildReverseIndex, progress, resolveState, roots, type CycleInfo, type ReverseIndex } from "../core/engine.ts";
 import type { Graph } from "../core/model.ts";
-import { planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
+import { normalizeForDuplicateCheck, planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
 import { countActionable, nextActions, search } from "../core/search.ts";
 import type { SirubeFs } from "../store/fs.ts";
 import { MarkdownGraphStore } from "../store/store.ts";
@@ -37,7 +37,26 @@ export interface AppHandle {
   reload(): Promise<void>;
 }
 
-export async function startApp(fs: SirubeFs): Promise<AppHandle> {
+/** 表示用にフォルダ名だけ取る。区切りは Windows / POSIX どちらも来る。 */
+function basename(p: string): string {
+  const parts = p.split(/[\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
+}
+
+export interface VaultInfo {
+  /** 今開いているフォルダの絶対パス。 */
+  path: string;
+  /** 別のフォルダを開き直す。実行すると画面ごと作り直される想定。 */
+  switchVault(): Promise<void>;
+}
+
+export interface AppOptions {
+  /** vault という概念があるシェル（Tauri）だけが渡す。dev サーバ版は
+   *  フォルダが固定なので渡さず、ヘッダーのボタンも出ない。 */
+  vault?: VaultInfo;
+}
+
+export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<AppHandle> {
   const store = new MarkdownGraphStore(fs);
   const { graph, issues } = await store.load();
 
@@ -81,11 +100,32 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
     render();
   });
 
+  // どの vault を開いているかは常に見えている必要がある。「フォルダを間違えた」と
+  // 「まだ何も無い」は画面が同じで、区別できないまま時間を溶かしたのが初回起動
+  // （2026-08-31）だった。名前を出しておけば、空の画面を見た瞬間に判断できる。
+  const vault = options.vault;
+  if (vault) {
+    const vaultBtn = el<HTMLButtonElement>("vault-btn");
+    vaultBtn.classList.remove("hidden");
+    vaultBtn.title = vault.path;
+    vaultBtn.append(iconSpan("folderOpen", 14), document.createTextNode(basename(vault.path)));
+    vaultBtn.addEventListener("click", () => openVault(vault));
+  }
+
+  const newRootBtn = el<HTMLButtonElement>("new-root-btn");
+  newRootBtn.append(iconSpan("plus", 15));
+  newRootBtn.addEventListener("click", () => openNewGoal());
+
   const reconcileBtn = el<HTMLButtonElement>("reconcile-btn");
   reconcileBtn.replaceChildren(iconSpan("wandSparkles", 14), document.createTextNode("自動解決"));
   reconcileBtn.addEventListener("click", () => openReconcile());
 
   // ---- 操作 --------------------------------------------------------------
+  /** 画面に出す名前。id は ULID なので、そのまま出すと読めない
+   *  （2026-09-01 の id/name 分離のあと、3箇所が素の id を出していた）。
+   *  ノードが既に消えている場合だけ id に落ちる。 */
+  const nameOf = (id: string): string => state.graph.nodes[id]?.name ?? id;
+
   const select = (id: string): void => {
     state.selectedId = id;
     render();
@@ -130,6 +170,8 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
   };
 
   const removeNode = async (id: string): Promise<void> => {
+    // 名前は消す前に控える。削除後の graph には当然もう無い。
+    const name = nameOf(id);
     await store.deleteNode(state.graph, id);
     if (state.focusId === id) state.focusId = undefined;
     if (state.selectedId === id) state.selectedId = undefined;
@@ -137,7 +179,7 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
     recompute();
     if (!state.focusId) state.mode = "list";
     render();
-    toast(`「${id}」を削除しました`);
+    toast(`「${name}」を削除しました`);
   };
 
   // ---- モーダル ----------------------------------------------------------
@@ -289,9 +331,91 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
   });
 
   /** 前提の一括追加。分解の流れに直結する MVP の中核。 */
+  /** 今の vault を見せ、別のフォルダへ切り替える。
+   *
+   * Obsidian と同じで、開くフォルダを丸ごと入れ替える形（複数 vault を同時に
+   * 開かない）。切り替えは画面ごと作り直す——ストアもエンジンも起動時に
+   * 組み上がるので、途中で差し替えるより読み直す方が確実。 */
+  const openVault = (info: VaultInfo): void => {
+    clear(modal);
+    modal.append(h("h3", {}, ["データの場所"]));
+    modal.append(h("p", { class: "hint" }, ["ノードはこのフォルダの中だけにあります。Git で共有するのも、Obsidian で開くのもこの単位。"]));
+    modal.append(h("div", { class: "vault-path" }, [info.path]));
+
+    const actions = h("div", { class: "modal-actions" });
+    const cancel = h("button", { class: "btn", type: "button" }, ["閉じる"]);
+    cancel.addEventListener("click", closeModal);
+    const swap = h("button", { class: "btn", type: "button" });
+    swap.append(iconSpan("folderOpen", 14), "別のフォルダを開く");
+    swap.addEventListener("click", () => void info.switchVault());
+    actions.append(cancel, swap);
+    modal.append(actions);
+    backdrop.classList.remove("hidden");
+  };
+
+  /** 新しい目的を1つ起こす。
+   *
+   * 空の vault ではノードが1つも無く、選択も無いので、インスペクタ側の
+   * 「前提を一括追加」には辿り着けない——**最初の1個を作る道がそこしか無いと
+   * 詰む**（2026-08-31 に懸念として記録し、2026-09-01 にコードで確認した）。
+   * サイドバーの見出しに常設し、0件のときは空表示からも同じ操作を出す。
+   *
+   * ここで作るのは「目的」だが、モデル上はただのノード（`type` は無い）。
+   * ルートかどうかは入次数0から導かれるので、後から誰かの前提として繋がれば
+   * 自然に目的ではなくなる。 */
+  const openNewGoal = (): void => {
+    clear(modal);
+    modal.append(h("h3", {}, ["新しい目的"]));
+    modal.append(
+      h("p", { class: "hint" }, [
+        "達成したいことを1つ書く。分解（何が必要か）は作ったあとで足せる。Enter で作成。",
+      ]),
+    );
+    const input = h("input", { type: "text", placeholder: "引っ越す" }) as HTMLInputElement;
+    modal.append(input);
+
+    const actions = h("div", { class: "modal-actions" });
+    const cancel = h("button", { class: "btn", type: "button" }, ["キャンセル"]);
+    cancel.addEventListener("click", closeModal);
+    const ok = h("button", { class: "btn primary", type: "button" }, ["作成"]);
+    ok.addEventListener("click", async () => {
+      const name = input.value.trim();
+      if (!name) {
+        toast("名前を入れてください");
+        return;
+      }
+      // 同じ名前が既にあるなら作らずそこへ飛ぶ。一括追加が「既にある名前を書けば
+      // そのノードに繋がる」挙動なので、こちらだけ黙って重複を作ると入口によって
+      // 結果が変わる。照合は表記ゆれを潰した上で行う（一括追加と同じ規則）。
+      const key = normalizeForDuplicateCheck(name);
+      const existing = Object.values(state.graph.nodes).find((n) => normalizeForDuplicateCheck(n.name) === key);
+      if (existing) {
+        closeModal();
+        focusFresh(existing.id);
+        toast(`「${existing.name}」は既にあります`);
+        return;
+      }
+      const node = await store.createNode(state.graph, name);
+      recompute();
+      closeModal();
+      focusFresh(node.id);
+      toast(`「${node.name}」を作りました`);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        ok.click();
+      }
+    });
+    actions.append(cancel, ok);
+    modal.append(actions);
+    backdrop.classList.remove("hidden");
+    input.focus();
+  };
+
   const openBulkAdd = (targetId: string): void => {
     clear(modal);
-    modal.append(h("h3", {}, [`「${targetId}」には何が必要？`]));
+    modal.append(h("h3", {}, [`「${nameOf(targetId)}」には何が必要？`]));
     modal.append(
       h("p", { class: "hint" }, [
         "1行に1つ書く。既にある名前を書けば、そのノードに繋がる（新しくは作られない）。Ctrl+Enter で追加。",
@@ -433,7 +557,15 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
     clear(list);
     const rootIds = roots(state.graph, state.rev);
     if (rootIds.length === 0) {
-      list.append(h("div", { class: "empty", style: "padding:12px 4px;font-size:12px" }, ["まだ目的がありません"]));
+      const empty = h("div", { class: "empty", style: "padding:12px 4px;font-size:12px" });
+      empty.append(h("div", {}, ["まだ目的がありません"]));
+      // 文言だけ出して終わらない。ここが起動直後の画面なので、次の操作が
+      // 同じ場所に無いと手が止まる。
+      const make = h("button", { class: "btn", type: "button", style: "margin-top:8px" });
+      make.append(iconSpan("plus", 13), "目的を作る");
+      make.addEventListener("click", () => openNewGoal());
+      empty.append(make);
+      list.append(empty);
       return;
     }
     for (const id of rootIds) {

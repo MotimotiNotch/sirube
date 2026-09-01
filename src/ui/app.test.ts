@@ -11,22 +11,17 @@ GlobalRegistrator.register();
 
 const { startApp } = await import("./app.ts");
 const { sampleFs } = await import("../dev/sample.ts");
+const { MemoryFs } = await import("../store/fs.ts");
 // UI テストはメモリ FS を使う（dev サーバに依存させない）。
 
-const HTML = `
-<header class="app-header"><div class="brand" id="brand"></div>
-  <div class="search-wrap"><span class="search-icon" id="search-icon"></span>
-  <input id="search-input" type="search" /></div>
-  <button class="btn" id="reconcile-btn" type="button"></button></header>
-<main class="app-body">
-  <aside class="sidebar"><button class="nav-item" id="nav-actionable" type="button"></button>
-    <div id="root-list" class="root-list"></div></aside>
-  <section class="center"><nav class="breadcrumb" id="breadcrumb"></nav>
-    <div class="center-body" id="center-body"></div></section>
-  <aside class="inspector" id="inspector"></aside>
-</main>
-<div class="modal-backdrop hidden" id="modal-backdrop"><div class="modal" id="modal"></div></div>
-<div class="toast-stack" id="toast-stack"></div>`;
+// 画面の骨組みは index.html をそのまま読む。ここに写しを置くと必ずずれる——
+// 実際、サイドバーに「新しい目的」ボタンを足したときに写しの方だけ古くなり、
+// 15件が `element not found` で落ちた（2026-09-01）。読み込む側が1つなら
+// ずれようがない。<script> だけは外す（テストは startApp を直接呼ぶ）。
+const HTML = (await Bun.file("index.html").text())
+  .replace(/[\s\S]*<body>/, "")
+  .replace(/<\/body>[\s\S]*/, "")
+  .replace(/<script[\s\S]*?<\/script>/g, "");
 
 const $ = (id: string): HTMLElement => document.getElementById(id)!;
 const text = (id: string): string => $(id).textContent ?? "";
@@ -203,5 +198,118 @@ describe("自動解決", () => {
     $("reconcile-btn").click();
     await tick();
     expect(text("modal")).toContain("分解が要る");
+  });
+});
+
+describe("新しい目的", () => {
+  test("目的が0件でも、そこから1個目を作れる", async () => {
+    // 空の vault では選択できるノードが無く、インスペクタの「前提を一括追加」に
+    // 辿り着けない。最初の1個を作る道がそこしか無いと、新しいフォルダを選んだ
+    // 人が詰む（2026-08-31 に懸念として記録、2026-09-01 にコードで確認）。
+    document.body.innerHTML = HTML;
+    await startApp(new MemoryFs());
+
+    expect(text("root-list")).toContain("まだ目的がありません");
+    findButton("root-list", "目的を作る")!.click();
+    await tick();
+
+    const input = $("modal").querySelector("input") as HTMLInputElement;
+    input.value = "引っ越す";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await tick();
+
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(true);
+    expect(text("root-list")).toContain("引っ越す");
+    expect(text("breadcrumb")).toContain("引っ越す");
+  });
+
+  test("同じ名前があるときは作らずそこへ飛ぶ", async () => {
+    // 一括追加は「既にある名前を書けばそのノードに繋がる」。こちらだけ黙って
+    // 重複を作ると、入口によって結果が変わる。
+    $("new-root-btn").click();
+    await tick();
+    const input = $("modal").querySelector("input") as HTMLInputElement;
+    input.value = "確定 申告"; // 表記ゆれ（空白）も同じものとして扱う
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await tick();
+
+    expect(text("breadcrumb")).toContain("確定申告");
+    const labels = buttonsIn("root-list").map((b) => b.textContent ?? "");
+    expect(labels.filter((l) => l.includes("確定申告")).length).toBe(1);
+  });
+
+  test("名前が空なら作らない", async () => {
+    $("new-root-btn").click();
+    await tick();
+    findButton("modal", "作成")!.click();
+    await tick();
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(false);
+  });
+});
+
+describe("画面に id を出さない", () => {
+  // id は ULID なので、画面に出ると人には読めない。2026-09-01 の id/name 分離の
+  // あと、実際に3箇所（削除トースト・一括追加の見出し・輪の提示）が素の id を
+  // 出していた。名前が出ていることを固定しておく。
+  const ULID_RE = /[0-9A-HJKMNP-TV-Z]{26}/;
+
+  test("起動直後の画面のどこにも id が出ていない", () => {
+    // 個別に潰すと必ず取りこぼす。実際、輪の提示・削除トースト・一括追加の
+    // 見出しを直した後にも、検索結果行のパンくずが id のままだった。
+    // 画面全体を1回で見る。
+    expect(ULID_RE.test(document.body.textContent ?? "")).toBe(false);
+  });
+
+  test("検索結果でも id が出ない", async () => {
+    const input = $("search-input") as HTMLInputElement;
+    input.value = "Tauri";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    expect(text("center-body")).toContain("Tauriシェル");
+    expect(ULID_RE.test(text("center-body"))).toBe(false);
+  });
+
+  test("輪の提示はノード名で並ぶ", () => {
+    const ring = $("center-body").querySelector(".cycle-ring") as HTMLElement;
+    expect(ring).toBeTruthy();
+    expect(ring.textContent ?? "").toContain("実績を作る");
+    expect(ULID_RE.test(ring.textContent ?? "")).toBe(false);
+  });
+
+  test("一括追加の見出しはノード名で出る", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    findButton("inspector", "前提を一括追加")!.click();
+    await tick();
+    expect(text("modal")).toContain("「確定申告」には何が必要？");
+    expect(ULID_RE.test(text("modal"))).toBe(false);
+  });
+});
+
+describe("vault の表示と切り替え", () => {
+  test("vault を渡さないシェル（dev サーバ）ではボタンを出さない", () => {
+    expect($("vault-btn").classList.contains("hidden")).toBe(true);
+  });
+
+  test("渡されたときはフォルダ名を出し、切り替えを呼べる", async () => {
+    document.body.innerHTML = HTML;
+    let switched = 0;
+    await startApp(sampleFs(), {
+      vault: { path: "C:\Users\me\my-vault", switchVault: async () => { switched += 1; } },
+    });
+
+    const btn = $("vault-btn");
+    expect(btn.classList.contains("hidden")).toBe(false);
+    expect(btn.textContent).toContain("my-vault");
+    expect(btn.title).toContain("C:\Users\me\my-vault");
+
+    btn.click();
+    await tick();
+    // フルパスは開いたときに見せる。どのフォルダを開いているかが分からないまま
+    // 空の画面を見るのが、初回起動で一番時間を溶かした状態だった。
+    expect(text("modal")).toContain("C:\Users\me\my-vault");
+    findButton("modal", "別のフォルダを開く")!.click();
+    await tick();
+    expect(switched).toBe(1);
   });
 });

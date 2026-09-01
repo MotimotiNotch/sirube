@@ -5,6 +5,16 @@
 //
 // 中身は Sirube プロジェクト自身のタスクグラフ ＋ 循環の実例（鶏卵問題）。
 // 循環を混ぜてあるのは、「今やれること」が輪でどう詰まるかを実機で見るため。
+//
+// **id は本物と同じ ULID にする**（2026-09-01）。id/name を分けたあとも
+// ここだけ「ファイル名＝ノード名」のままだったため、dev と test の全経路が
+// id === name の世界しか通らなくなっていた。結果、画面に素の id が出る不具合が
+// 3箇所あっても誰も気付けない。id は固定値にしてある——毎回採番すると
+// スナップショット的なテストが書けず、diff も無意味に動くため。
+//
+// 参照の書き方も本物に合わせて混ぜる: 書き手（アプリ）は id で書き、人が手で
+// 足した行は名前のまま残る。読み側は両方受け付ける（resolveReferences）ので、
+// その両方をここで通しておく。
 
 import { MemoryFs } from "../store/fs.ts";
 
@@ -60,15 +70,34 @@ const SEEDS: Record<string, Seed> = {
   領収書整理: {},
 };
 
-function toMarkdown(seed: Seed): string {
-  const lines = ["---", `satisfied: ${seed.satisfied ?? false}`];
+/** 名前 → 固定 ULID。Crockford Base32・26文字という形式チェックだけは
+ *  本物と同じものを通るようにしてある（先頭は時刻部のつもりの固定値）。 */
+const IDS: Record<string, string> = Object.fromEntries(
+  // Crockford Base32 には I / L / O / U が無い。ここを外すと isUlid() が落ちて
+  // 「ファイル名が id の形式ではありません」が全件に出る（"SAMPLE" の L で踏んだ）。
+  Object.keys(SEEDS).map((name, i) => [name, `01M0DEV${String(i).padStart(2, "0")}${"0".repeat(17)}`]),
+);
+
+/** 参照を id へ寄せる。ただし一部はわざと名前のまま残す——人が手で書いた行を
+ *  読み側が解決できることまで含めて dev で確かめたいため。 */
+function ref(name: string, keepName: boolean): string {
+  return keepName ? name : (IDS[name] ?? name);
+}
+
+function toMarkdown(seed: Seed, name: string): string {
+  const lines = ["---", `name: ${name}`, `satisfied: ${seed.satisfied ?? false}`];
   const arr = (key: string, values: string[] | undefined): void => {
     if (!values || values.length === 0) {
       lines.push(`${key}: []`);
       return;
     }
     lines.push(`${key}:`);
-    for (const v of values) lines.push(`  - ${v}`);
+    values.forEach((v, i) => {
+      // 各リストの最後の1件だけ名前のまま（手書き行の再現）。
+      const keepName = i === values.length - 1;
+      const written = ref(v, keepName);
+      lines.push(keepName ? `  - ${written}` : `  - ${written}  # ${v}`);
+    });
   };
   arr("requires", seed.requires);
   arr("contains", seed.contains);
@@ -80,13 +109,13 @@ function toMarkdown(seed: Seed): string {
 
 /** ノード id → Markdown テキスト。dev サーバが実ファイルとして書き出すのにも使う。 */
 export const SAMPLE_MARKDOWN: Record<string, string> = Object.fromEntries(
-  Object.entries(SEEDS).map(([id, seed]) => [id, toMarkdown(seed)]),
+  Object.entries(SEEDS).map(([name, seed]) => [IDS[name]!, toMarkdown(seed, name)]),
 );
 
 export function sampleFs(): MemoryFs {
   const fs = new MemoryFs();
-  for (const [id, seed] of Object.entries(SEEDS)) {
-    fs.files.set(id, { content: toMarkdown(seed), mtimeMs: fs.tick() });
+  for (const [name, seed] of Object.entries(SEEDS)) {
+    fs.files.set(IDS[name]!, { content: toMarkdown(seed, name), mtimeMs: fs.tick() });
   }
   return fs;
 }

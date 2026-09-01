@@ -42,7 +42,7 @@ export function renderList(
   // 詰まっている輪は結果より先に出す。「今やれることが空」の理由が
   // 見えないまま終わるのが、このツールで一番まずい失敗の仕方。
   for (const cycle of result.cycles) {
-    container.append(cycleNotice(cycle, cb));
+    container.append(cycleNotice(graph, cycle, cb));
   }
 
   if (result.hits.length === 0) {
@@ -69,8 +69,16 @@ export function renderList(
     // パンくずは名前と同じ行の右側へ。二段組をやめると行数が半分以下になる。
     // 空でも要素は置く——右寄せの基準をこの1つに集約しておかないと、
     // meta 側の auto マージンと余白を分け合って中途半端な位置で止まる。
-    const crumb = h("span", { class: "hit-crumb" }, [hit.breadcrumb.join(" / ")]);
-    if (hit.breadcrumb.length > 0) crumb.title = `${hit.breadcrumb.join(" / ")} の下`;
+    //
+    // `breadcrumb` は id の配列（コアは表示を決めない）。ここで名前に直す——
+    // id/name を分けたあと、ここだけ id をそのまま出して行の右端に ULID が
+    // 並んでいた（2026-09-01）。並び順も id ではなく名前で決める。
+    const crumbText = hit.breadcrumb
+      .map((rootId) => graph.nodes[rootId]?.name ?? rootId)
+      .sort((a, b) => a.localeCompare(b, "ja"))
+      .join(" / ");
+    const crumb = h("span", { class: "hit-crumb" }, [crumbText]);
+    if (crumbText) crumb.title = `${crumbText} の下`;
     main.append(crumb);
 
     const meta = h("div", { class: "hit-meta" });
@@ -122,7 +130,7 @@ export function renderList(
  * 次の操作が決まる——しかも割る操作は既存の一括追加がそのまま使える。
  *
  * 理由の説明は畳んでおく。毎回同じ文が画面の1/4を占めていた。 */
-function cycleNotice(cycle: string[], cb: ListCallbacks): HTMLElement {
+function cycleNotice(graph: Graph, cycle: string[], cb: ListCallbacks): HTMLElement {
   const box = h("div", { class: "cycle-notice" });
 
   const head = h("div", { class: "cycle-head" });
@@ -132,7 +140,7 @@ function cycleNotice(cycle: string[], cb: ListCallbacks): HTMLElement {
 
   const ring = h("div", { class: "cycle-ring" });
   cycle.forEach((id, i) => {
-    const chip = h("button", { class: "chip", type: "button" }, [id]);
+    const chip = h("button", { class: "chip", type: "button" }, [graph.nodes[id]?.name ?? id]);
     chip.addEventListener("click", () => cb.onSelect(id));
     ring.append(chip);
     if (i < cycle.length - 1) ring.append(iconSpan("chevronRight", 12));

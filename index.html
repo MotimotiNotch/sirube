@@ -19,13 +19,17 @@
           spellcheck="false"
         />
       </div>
+      <button class="btn hidden" id="vault-btn" type="button"></button>
       <button class="btn" id="reconcile-btn" type="button">自動解決</button>
     </header>
 
     <main class="app-body">
       <aside class="sidebar">
         <button class="nav-item" id="nav-actionable" type="button"></button>
-        <h2 class="sidebar-heading">目的</h2>
+        <div class="sidebar-heading-row">
+          <h2 class="sidebar-heading">目的</h2>
+          <button class="icon-btn" id="new-root-btn" type="button" title="新しい目的を作る"></button>
+        </div>
         <div id="root-list" class="root-list"></div>
       </aside>
 

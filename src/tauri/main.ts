@@ -16,18 +16,27 @@ const VAULT_KEY = "sirube.vaultPath";
  *
  * データは丸ごとそのフォルダの中で完結する（`nodes/*.md` と `.sirube/`）。
  * Git で共有するのも Obsidian で開くのも、このフォルダ単位。 */
-async function resolveVault(): Promise<string | undefined> {
-  const saved = localStorage.getItem(VAULT_KEY);
-  if (saved) return saved;
-
-  const picked = await open({
-    directory: true,
-    multiple: false,
-    title: "Sirube のデータを置くフォルダを選んでください",
-  });
+async function pickVault(title: string): Promise<string | undefined> {
+  const picked = await open({ directory: true, multiple: false, title });
   if (typeof picked !== "string") return undefined;
   localStorage.setItem(VAULT_KEY, picked);
   return picked;
+}
+
+async function resolveVault(): Promise<string | undefined> {
+  const saved = localStorage.getItem(VAULT_KEY);
+  if (saved) return saved;
+  return pickVault("Sirube のデータを置くフォルダを選んでください");
+}
+
+/** 開くフォルダを入れ替える（Obsidian の vault 切り替えと同じ形）。
+ *
+ * 差し替えではなく読み込み直し。ストア・エンジン・インデックスは全部起動時に
+ * 組み上がるので、途中で fs だけ挿し替えると古い状態がどこかに残る。
+ * キャンセルされたときは何もしない——保存済みのパスも書き換えない。 */
+async function switchVault(): Promise<void> {
+  const picked = await pickVault("開くフォルダを選んでください");
+  if (picked) location.reload();
 }
 
 function showFatal(message: string): void {
@@ -51,7 +60,7 @@ if (!vault) {
 
     const fs = new TauriFs(vault);
     await fs.ensureLayout();
-    const app = await startApp(fs);
+    const app = await startApp(fs, { vault: { path: vault, switchVault } });
 
     // 外部からの変更（エディタ・Obsidian・エージェント・git のマージ）を拾って
     // 読み直す。デバウンス付きなので git checkout のような一斉変更でも

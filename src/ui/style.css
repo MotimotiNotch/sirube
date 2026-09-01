@@ -190,6 +190,29 @@ body.resizing { cursor: col-resize; user-select: none; }
   text-transform: uppercase;
 }
 
+/* 見出しの右端に「＋」を置く。目的が0件のときにも必ず見えている場所が要る——
+ * 空の vault では選択できるノードが無く、インスペクタ側の一括追加に辿り着けない。 */
+.sidebar-heading-row {
+  display: flex;
+  align-items: center;
+}
+.sidebar-heading-row .sidebar-heading { flex: 1 1 auto; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+.icon-btn:hover { background: var(--bg-sunken); color: var(--fg); }
+
 .nav-item,
 .root-item {
   display: flex;
@@ -596,6 +619,15 @@ body.no-inspector #inspector-resizer {
 }
 .modal h3 { margin: 0 0 4px; font-size: 16px; }
 .modal p.hint { margin: 0 0 12px; color: var(--fg-muted); font-size: 13px; }
+.modal input[type="text"] {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--fg);
+  padding: 10px;
+  font: inherit;
+}
 .modal textarea {
   width: 100%;
   min-height: 150px;
@@ -606,6 +638,16 @@ body.no-inspector #inspector-resizer {
   padding: 10px;
   font: inherit;
   resize: vertical;
+}
+.vault-path {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  color: var(--fg-muted);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  word-break: break-all;
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .hidden { display: none !important; }
