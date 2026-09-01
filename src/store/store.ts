@@ -4,9 +4,10 @@
 // 読んで全体を書き戻していた。ここでは**変更されたノードのファイルだけ**を
 // 書く。git diff が「誰がどのノードを完了したか」そのものになるのが狙い。
 
-import { buildReverseIndex, toggleSatisfied, type ReverseIndex } from "../core/engine.ts";
+import { analyzeCycles, buildReverseIndex, toggleSatisfied, type ReverseIndex } from "../core/engine.ts";
 import { parseBulkRequires, parseDsl, type DslParseResult } from "../core/dsl.ts";
 import { newGraph, newNode, type Graph, type Node } from "../core/model.ts";
+import { GOALS_DIR, renderMocs } from "../core/moc.ts";
 import { applyPlan, planReconcile, type ReconcilePlan } from "../core/reconcile.ts";
 import { parseNodeFile, serializeNodeFile } from "./frontmatter.ts";
 import type { SirubeFs } from "./fs.ts";
@@ -99,6 +100,26 @@ export class MarkdownGraphStore {
     const { created, updated } = mergeNodes(graph, parsed.nodes);
     await this.persist(graph, [...created, ...updated]);
     return { created, updated, errors: [] };
+  }
+
+  /** 入口ファイル（MOC 3層）を書き直す。
+   *
+   * 生成物なので**全部書き直して、二度と読み返さない**。読み返した瞬間に
+   * 第二の真実になり、`nodes/` との食い違いを解決する仕事が増える。
+   * 消えていても壊れないため、失敗しても本体の操作は続行してよい。 */
+  async regenerateMocs(graph: Graph): Promise<void> {
+    const docs = renderMocs(graph, buildReverseIndex(graph), analyzeCycles(graph));
+    for (const doc of docs) await this.fs.writeDoc(doc.path, doc.content);
+
+    // 消えた目的の層2ファイルを片付ける。残っていても実害は無いが、
+    // 存在しない目的の「道」が並ぶと入口としての信頼が落ちる。
+    const prefix = `${GOALS_DIR}/`;
+    const keep = new Set(
+      docs.filter((d) => d.path.startsWith(prefix)).map((d) => d.path.slice(prefix.length)),
+    );
+    for (const name of await this.fs.listDocs(GOALS_DIR)) {
+      if (!keep.has(name)) await this.fs.deleteDoc(`${prefix}${name}`);
+    }
   }
 
   /** 自動解決の計画（グラフは変更しない）。プレビューに使う。 */

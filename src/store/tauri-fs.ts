@@ -7,7 +7,7 @@
 // 対象は `<vault>/nodes/*.md` だけ。設定は `<vault>/.sirube/` に置く想定。
 
 import { mkdir, readDir, readTextFile, remove, stat, watch, writeTextFile, type UnwatchFn } from "@tauri-apps/plugin-fs";
-import type { NodeFileEntry, SirubeFs } from "./fs.ts";
+import { assertDocPath, type NodeFileEntry, type SirubeFs } from "./fs.ts";
 
 const NODES_DIR = "nodes";
 const EXT = ".md";
@@ -64,6 +64,34 @@ export class TauriFs implements SirubeFs {
       return info.mtime ? info.mtime.getTime() : 0;
     } catch {
       return 0;
+    }
+  }
+
+  // --- 生成物（MOC）------------------------------------------------------
+
+  async writeDoc(relPath: string, content: string): Promise<void> {
+    assertDocPath(relPath);
+    const slash = relPath.lastIndexOf("/");
+    if (slash > 0) await mkdir(`${this.vaultPath}/${relPath.slice(0, slash)}`, { recursive: true });
+    await writeTextFile(`${this.vaultPath}/${relPath}`, content);
+  }
+
+  async listDocs(dirRelPath: string): Promise<string[]> {
+    assertDocPath(dirRelPath);
+    try {
+      const entries = await readDir(`${this.vaultPath}/${dirRelPath}`);
+      return entries.filter((e) => !e.isDirectory && e.name.endsWith(EXT)).map((e) => e.name);
+    } catch {
+      return []; // まだ作られていない。生成物なので無ければ無いでよい。
+    }
+  }
+
+  async deleteDoc(relPath: string): Promise<void> {
+    assertDocPath(relPath);
+    try {
+      await remove(`${this.vaultPath}/${relPath}`);
+    } catch {
+      // 既に無い。生成物の後始末なので失敗しても困らない。
     }
   }
 

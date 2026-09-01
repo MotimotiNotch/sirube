@@ -46,4 +46,22 @@ export class HttpFs implements SirubeFs {
     const { mtimeMs } = await this.json<{ mtimeMs: number }>(`/stat/${encodeURIComponent(id)}`);
     return mtimeMs;
   }
+
+  async writeDoc(relPath: string, content: string): Promise<void> {
+    const res = await fetch(`${this.base}/doc/${encodeURIComponent(relPath)}`, {
+      method: "PUT",
+      headers: { "content-type": "text/plain; charset=utf-8" },
+      body: content,
+    });
+    if (!res.ok) throw new Error(`write doc failed: ${relPath}`);
+  }
+
+  async listDocs(dirRelPath: string): Promise<string[]> {
+    return this.json<string[]>(`/docs/${encodeURIComponent(dirRelPath)}`);
+  }
+
+  async deleteDoc(relPath: string): Promise<void> {
+    const res = await fetch(`${this.base}/doc/${encodeURIComponent(relPath)}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 404) throw new Error(`delete doc failed: ${relPath}`);
+  }
 }

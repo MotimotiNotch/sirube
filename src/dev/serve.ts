@@ -11,7 +11,7 @@
 // バインドは 127.0.0.1 限定。ローカルのファイルを触る口を LAN に晒さない。
 
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { SAMPLE_MARKDOWN } from "./sample.ts";
 
 const PORT = 5177;
@@ -29,6 +29,13 @@ async function ensureVault(): Promise<void> {
     await writeFile(join(nodesDir, `${id}${EXT}`), content, "utf8");
   }
   console.log(`サンプルを書き出しました: ${nodesDir}`);
+}
+
+/** 生成物（MOC）の相対パス → 絶対パス。`nodes/` の外にしか書かせない。 */
+function docPath(relPath: string): string {
+  if (relPath.includes("\\") || relPath.includes("..") || relPath.startsWith("/")) throw new Error("invalid doc path");
+  if (relPath === "nodes" || relPath.startsWith("nodes/")) throw new Error("cannot write into nodes/");
+  return join(vaultRoot, relPath);
 }
 
 /** ノード id → 絶対パス。区切り文字を含む id は弾く（ディレクトリ横断を防ぐ）。 */
@@ -87,6 +94,33 @@ const server = Bun.serve({
 
       if (path.startsWith("/api/stat/")) {
         return Response.json({ mtimeMs: await mtimeOf(path.slice("/api/stat/".length)) });
+      }
+
+      if (path.startsWith("/api/docs/")) {
+        const dir = docPath(path.slice("/api/docs/".length));
+        try {
+          return Response.json((await readdir(dir)).filter((f) => f.endsWith(EXT)));
+        } catch {
+          return Response.json([]); // まだ無い。生成物なので無ければ無いでよい。
+        }
+      }
+
+      if (path.startsWith("/api/doc/")) {
+        const rel = path.slice("/api/doc/".length);
+        const abs = docPath(rel);
+        if (req.method === "PUT") {
+          await mkdir(dirname(abs), { recursive: true });
+          await writeFile(abs, await req.text(), "utf8");
+          return new Response("ok");
+        }
+        if (req.method === "DELETE") {
+          try {
+            await unlink(abs);
+          } catch {
+            // 既に無い。後始末なので失敗しても困らない。
+          }
+          return new Response("ok");
+        }
       }
 
       if (path.startsWith("/api/node/")) {

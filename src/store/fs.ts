@@ -23,6 +23,26 @@ export interface SirubeFs {
   deleteNode(id: string): Promise<void>;
   /** 書き込み直後の mtime を取り直すため。 */
   statNode(id: string): Promise<number>;
+
+  // --- 生成物（MOC）------------------------------------------------------
+  // `nodes/` の外にしか書かない。**読み出す口はわざと用意していない**——
+  // 生成物を読み返した瞬間に第二の真実になるため。消えていても壊れない。
+
+  /** vault ルートからの相対パスへ書く。途中のフォルダは作る。 */
+  writeDoc(relPath: string, content: string): Promise<void>;
+  /** 生成物フォルダ直下の `*.md` を列挙する（消えた目的の後始末用）。 */
+  listDocs(dirRelPath: string): Promise<string[]>;
+  deleteDoc(relPath: string): Promise<void>;
+}
+
+/** 生成物の相対パスとして安全か。ディレクトリ横断と `nodes/` への書き込みを防ぐ。 */
+export function assertDocPath(relPath: string): void {
+  if (relPath.includes("\\") || relPath.includes("..") || relPath.startsWith("/")) {
+    throw new Error(`生成物のパスとして使えません: ${relPath}`);
+  }
+  if (relPath === "nodes" || relPath.startsWith("nodes/")) {
+    throw new Error(`生成物を nodes/ の中には書けません: ${relPath}`);
+  }
 }
 
 /** テストと、まだ Tauri シェルが無い段階の開発用。 */
@@ -62,5 +82,23 @@ export class MemoryFs implements SirubeFs {
   }
   async statNode(id: string): Promise<number> {
     return this.files.get(id)?.mtimeMs ?? 0;
+  }
+
+  /** 生成物。ノードとは別の入れ物に持つ（`listNodes` に混ざらないように）。 */
+  readonly docs = new Map<string, string>();
+
+  async writeDoc(relPath: string, content: string): Promise<void> {
+    assertDocPath(relPath);
+    this.docs.set(relPath, content);
+  }
+  async listDocs(dirRelPath: string): Promise<string[]> {
+    const prefix = `${dirRelPath}/`;
+    return [...this.docs.keys()]
+      .filter((k) => k.startsWith(prefix) && k.endsWith(".md") && !k.slice(prefix.length).includes("/"))
+      .map((k) => k.slice(prefix.length));
+  }
+  async deleteDoc(relPath: string): Promise<void> {
+    assertDocPath(relPath);
+    this.docs.delete(relPath);
   }
 }

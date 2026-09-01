@@ -55,9 +55,18 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
   }
 
   // ---- 再計算 ------------------------------------------------------------
+  /** 入口ファイルの書き直し。**画面を止めない**——生成物が古いことはあっても
+   *  壊れることは無いので、失敗しても操作は続けさせる。 */
+  const syncMocs = (): void => {
+    void store.regenerateMocs(state.graph).catch(() => {
+      toast("入口ファイル（MOC）の更新に失敗しました");
+    });
+  };
+
   const recompute = (): void => {
     state.rev = buildReverseIndex(state.graph);
     state.cycles = analyzeCycles(state.graph);
+    syncMocs();
   };
 
   // ---- ヘッダー ----------------------------------------------------------
@@ -116,6 +125,7 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
     if (!node) return;
     node.note = note;
     await store.persist(state.graph, [id]);
+    syncMocs(); // 構造は変わらないが mtime は動くので、目的の並び順に効く
     toast("メモを保存しました");
   };
 
@@ -513,6 +523,7 @@ export async function startApp(fs: SirubeFs): Promise<AppHandle> {
   };
 
   render();
+  syncMocs(); // 起動時に1回。前回の終了後に手で書き換えられていても追いつく。
 
   return {
     async reload() {
