@@ -480,20 +480,24 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     if (plan.fixes.length > 0) {
       modal.append(h("h4", { style: "margin:12px 0 4px;font-size:12px" }, [`自動解決する（${plan.fixes.length}）`]));
       const ul = h("ul", { class: "plan-list" });
+      // 計画は id で組み立てられている（コアは表示を決めない）ので、出す直前に
+      // 名前へ直す。`create-missing-node` の対象だけはグラフにまだ居ないため
+      // nameOf が id のまま返すが、そこは正しい——リンク切れの参照は人が手で
+      // 書いた文字列そのものであって、それを見せないと直しようがない。
       for (const f of plan.fixes) {
         const li = h("li");
         switch (f.kind) {
           case "satisfy-prerequisite":
-            li.append(h("span", { class: "plan-kind" }, ["前提を埋める"]), `${f.prerequisite}（${f.node} の方が新しい）`);
+            li.append(h("span", { class: "plan-kind" }, ["前提を埋める"]), `${nameOf(f.prerequisite)}（${nameOf(f.node)} の方が新しい）`);
             break;
           case "unsatisfy-node":
-            li.append(h("span", { class: "plan-kind" }, ["達成を戻す"]), `${f.node}（${f.prerequisite} の方が新しい）`);
+            li.append(h("span", { class: "plan-kind" }, ["達成を戻す"]), `${nameOf(f.node)}（${nameOf(f.prerequisite)} の方が新しい）`);
             break;
           case "satisfy-contains-parent":
-            li.append(h("span", { class: "plan-kind" }, ["親を達成に"]), `${f.parent}（子が全部揃った）`);
+            li.append(h("span", { class: "plan-kind" }, ["親を達成に"]), `${nameOf(f.parent)}（子が全部揃った）`);
             break;
           case "create-missing-node":
-            li.append(h("span", { class: "plan-kind" }, ["空ノード作成"]), `${f.id}（${f.referencedBy.join(", ")} が参照）`);
+            li.append(h("span", { class: "plan-kind" }, ["空ノード作成"]), `${f.id}（${f.referencedBy.map(nameOf).join(", ")} が参照）`);
             break;
         }
         ul.append(li);
@@ -509,11 +513,11 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       for (const u of plan.unresolved) {
         const li = h("li");
         if (u.kind === "cycle") {
-          li.append(h("span", { class: "plan-kind" }, ["輪"]), `${u.nodes.join(" → ")} → …（分解が要る）`);
+          li.append(h("span", { class: "plan-kind" }, ["輪"]), `${u.nodes.map(nameOf).join(" → ")} → …（分解が要る）`);
         } else if (u.kind === "near-duplicate") {
-          li.append(h("span", { class: "plan-kind" }, ["表記ゆれ"]), u.ids.join(" / "));
+          li.append(h("span", { class: "plan-kind" }, ["表記ゆれ"]), u.ids.map(nameOf).join(" / "));
         } else {
-          li.append(h("span", { class: "plan-kind" }, ["時刻が同着"]), `${u.node} と ${u.prerequisite}`);
+          li.append(h("span", { class: "plan-kind" }, ["時刻が同着"]), `${nameOf(u.node)} と ${nameOf(u.prerequisite)}`);
         }
         ul.append(li);
       }

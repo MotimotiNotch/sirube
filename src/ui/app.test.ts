@@ -251,13 +251,58 @@ describe("画面に id を出さない", () => {
   // id は ULID なので、画面に出ると人には読めない。2026-09-01 の id/name 分離の
   // あと、実際に3箇所（削除トースト・一括追加の見出し・輪の提示）が素の id を
   // 出していた。名前が出ていることを固定しておく。
-  const ULID_RE = /[0-9A-HJKMNP-TV-Z]{26}/;
+  // 単語境界（word boundary）は使わない。書こうとしたエスケープが
+  // **バックスペース文字そのもの**としてソースに埋まり、この正規表現は何にも
+  // 一致しなくなっていた（2026-09-01、のっちの「自動解決の表示が ULID」報告から
+  // 発覚。それまでの id 検査は全部空振りしていた）。reconcile.ts に生の NUL が
+  // 埋まっていたのと同じ事故で、目で見ても分からない。26文字の連続さえ見れば
+  // 境界は要らないので、エスケープを1つも使わない形にしてある。
+  const ULID_RE = /[0-9A-HJKMNP-TV-Z]{26}/;
+
+  test("検出器そのものが効いている", () => {
+    // 否定の主張は、道具が壊れていても通ってしまう。陽性対照を1つ置いておく。
+    expect(ULID_RE.test("01M0DEV0000000000000000000")).toBe(true);
+    expect(ULID_RE.test("確定申告")).toBe(false);
+  });
 
   test("起動直後の画面のどこにも id が出ていない", () => {
     // 個別に潰すと必ず取りこぼす。実際、輪の提示・削除トースト・一括追加の
     // 見出しを直した後にも、検索結果行のパンくずが id のままだった。
     // 画面全体を1回で見る。
     expect(ULID_RE.test(document.body.textContent ?? "")).toBe(false);
+  });
+
+  test("モーダルにも id が出ない", async () => {
+    // 起動直後の画面だけ見ていたので、自動解決モーダルが id をそのまま並べて
+    // いるのに気付けなかった（のっち報告、2026-09-01）。開くものは全部見る。
+    $("reconcile-btn").click();
+    await tick();
+    expect(text("modal")).toContain("自動解決");
+    expect(ULID_RE.test(text("modal"))).toBe(false);
+    findButton("modal", "閉じる")!.click();
+    await tick();
+
+    $("new-root-btn").click();
+    await tick();
+    expect(ULID_RE.test(text("modal"))).toBe(false);
+    findButton("modal", "キャンセル")!.click();
+    await tick();
+
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    expect(ULID_RE.test(text("inspector"))).toBe(false);
+    findButton("inspector", "前提を一括追加")!.click();
+    await tick();
+    expect(ULID_RE.test(text("modal"))).toBe(false);
+  });
+
+  test("自動解決は輪の中身を名前で並べる", async () => {
+    // サンプルには輪がある＝「判断が必要」に必ず1件出る。中身が名前で出ることを
+    // 直接押さえる（ULID_RE だけだと、空になっていても通ってしまう）。
+    $("reconcile-btn").click();
+    await tick();
+    expect(text("modal")).toContain("実績を作る");
+    expect(text("modal")).toContain("案件を取る");
   });
 
   test("検索結果でも id が出ない", async () => {
