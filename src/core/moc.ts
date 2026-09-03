@@ -131,15 +131,21 @@ function actionableUnder(g: Graph, rootId: string, rev: ReverseIndex, cyclic: Re
  * `.` と `+` は通す（`リリース: v1.0` や `C++ に移植` が読める形で残る）。
  * ここは表示用のファイル名であって id ではないため、潰した結果が衝突しても
  * 連番で避ければ足りる。大小を無視して突き合わせるのは、ファイルシステムが
- * `Ruv` と `ruv` を同じものとして扱うため。 */
+ * `Ruv` と `ruv` を同じものとして扱うため。
+ *
+ * **`_の道` のような印は付けない。** 生成物であることは既に2つが言っている——
+ * `goals/` フォルダに置くのは生成物だけ（テストで固定）で、なにより
+ * **`nodes/` のファイル名は全部 ULID なので、名前が読めるファイルは生成物しか
+ * 無い**（のっち 2026-09-03）。名前の末尾でもう一度言うと、助詞だけが単語として
+ * 浮いた `Sirube_をリリースする_の道` になり、開くたびに読まされる。 */
 function goalFileName(name: string, taken: Set<string>): string {
   const cleaned = name
     .replace(/[^\p{L}\p{N}_.+-]/gu, "_")
     .replace(/_+/g, "_")
     .replace(/^[_.]+|[_.]+$/g, "");
   const base = cleaned === "" ? "goal" : cleaned;
-  let candidate = `${base}_の道`;
-  for (let n = 2; taken.has(candidate.toLowerCase()); n += 1) candidate = `${base}_の道_${n}`;
+  let candidate = base;
+  for (let n = 2; taken.has(candidate.toLowerCase()); n += 1) candidate = `${base}_${n}`;
   taken.add(candidate.toLowerCase());
   return candidate;
 }
