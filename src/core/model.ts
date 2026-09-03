@@ -34,11 +34,45 @@ export const NodeFrontmatterSchema = z.object({
   satisfied: z.boolean().default(false),
   requires: z.array(z.string()).default([]),
   contains: z.array(z.string()).default([]),
+  /** vault 内で通しの番号。`#12` のように人が口に出して指すための札。
+   *
+   * **参照には使わない**（参照は今までどおり id）。付けるのはアプリで、人は
+   * 選ばない——「フィールドを増やさない」の禁止理由は「同じことを2通りで書ける
+   * ようにすると、ノードを作るたびに迷いが生まれる」ことなので、自動で振られる
+   * 札はそこに当たらない。
+   *
+   * 採番は既存の最大+1。ULID と違い**ファイル名ではないので、2台で同時に
+   * 作ると git は衝突を検出できない**（別ファイルの中身が違うだけになる）。
+   * 静かに壊れないよう、読み込み時に重複を検出して後から作られた方を振り直す。 */
+  number: z.number().int().positive().optional(),
   /** 外部要因で本当に日付があるノード用（確定申告・契約更新など）。
    * 警告表示や催促はしない——放置すると全部赤くなってノイズ化し、
    * 「中断耐性」という売りと衝突するため。 */
   due: z.string().optional(),
+  /** 目的に貼る付箋の色（`GOAL_COLORS` のどれか）。
+   *
+   * 上の原則4「優先度もタグも持たない」の例外にあたる。ただし原則が代替として
+   * 挙げている「優先度＝合流点の入次数」「分類＝エッジ」は、**目的（入次数0）
+   * には効かない**——目的同士に依存関係は無く、入次数は全部0になる。そこだけが
+   * 射程の外なので、**色を貼れるのは目的だけ**に限る。末端まで貼れるようにすると
+   * それはタグそのもので、原則4が禁じている「同じことを2通りで書ける」に戻る。
+   *
+   * 未知の値は弾かない。描く側が知らない色を無視すれば済む話で、1ノードの値が
+   * 変なだけでグラフを落とさない方針に合わせる。 */
+  color: z.string().optional(),
 });
+
+/** 目的に貼れる付箋の色。**順序に意味は無い**——「赤が黄より優先」のような序列を
+ *  持たせない。何を意味するかは貼る人が決める（今期はこれをやる／この2つは同じ話）。
+ *
+ *  hex ではなく名前で持つ。実際の色はテーマごとに CSS 側が決める——hex を保存すると、
+ *  明るい画面で選んだ色が暗い画面で読めないまま焼き付く。 */
+export const GOAL_COLORS = ["yellow", "orange", "pink", "purple", "blue", "green"] as const;
+export type GoalColor = (typeof GOAL_COLORS)[number];
+
+export function isGoalColor(v: unknown): v is GoalColor {
+  return typeof v === "string" && (GOAL_COLORS as readonly string[]).includes(v);
+}
 export type NodeFrontmatter = z.infer<typeof NodeFrontmatterSchema>;
 
 /** メモリ上のノード。`id` はファイル名（拡張子なし）そのもの。

@@ -57,6 +57,25 @@ export function buildReverseIndex(g: Graph): ReverseIndex {
  * 返り値は成分ごとのノード id 配列。要素数1の成分は自己ループのときだけ
  * 含める。 */
 export function findCycles(g: Graph): string[][] {
+  return findCyclesOn(g, (n) => n.requires);
+}
+
+/** `contains` だけを辿った輪。
+ *
+ * こちらは**分解が足りない信号ではなく、純粋な入力ミス**（「A の中に B、B の中に
+ * A」は意味を成さない）。だから `CYCLIC` にはせず、自動解決の「判断が必要」へ
+ * 出す。文言も「割る」ではなく「エッジが間違っている」側になる。
+ *
+ * 検出そのものは要る。放っておくと `resolveState` の保険ガードに落ちて
+ * **理由の出ない `BLOCKED`** になり、「今やれることが空なのに理由が分からない」
+ * という、このツールにとって一番まずい失敗の仕方をする。 */
+export function findContainsCycles(g: Graph): string[][] {
+  return findCyclesOn(g, (n) => n.contains);
+}
+
+/** 辿るエッジを差し替えられる Tarjan。2種類のエッジで同じ実装を使う——
+ *  片方だけ直して、もう片方が古い判定のまま残るのを防ぐ。 */
+function findCyclesOn(g: Graph, edgesOf: (n: Graph["nodes"][string]) => readonly string[]): string[][] {
   // Tarjan の強連結成分分解。
   let index = 0;
   const indices = new Map<string, number>();
@@ -72,7 +91,8 @@ export function findCycles(g: Graph): string[][] {
     stack.push(v);
     onStack.add(v);
 
-    for (const w of g.nodes[v]?.requires ?? []) {
+    const node = g.nodes[v];
+    for (const w of node ? edgesOf(node) : []) {
       if (!g.nodes[w]) continue; // リンク切れは lint の担当、ここでは無視
       if (!indices.has(w)) {
         strongConnect(w);
@@ -90,7 +110,8 @@ export function findCycles(g: Graph): string[][] {
         component.push(w);
         if (w === v) break;
       }
-      const selfLoop = component.length === 1 && (g.nodes[v]?.requires.includes(v) ?? false);
+      const self = g.nodes[v];
+      const selfLoop = component.length === 1 && (self ? edgesOf(self).includes(v) : false);
       if (component.length > 1 || selfLoop) result.push(component.reverse());
     }
   };
@@ -266,6 +287,10 @@ export function cascadeUnsatisfyDependents(
  * `contains` の子が全部揃った親を、自動で達成にする（下→上への集約）。
  * 親に固有の作業が無いからこそ `contains` なので、子が揃えば親は完成している。
  *
+ * **ただし親の `requires` も満たされていること。** 「必要なものが全部揃った」
+ * の判定は `resolveState()` と同じでなければならない——片方だけが両エッジを
+ * 見ていると、導出とカスケードが別のことを言い始める。
+ *
  * 一方向のみ（2026-08-26 のっち判断）。子を1つ戻しても親は自動では戻さない
  * ——到達した達成は記録として残す。
  */
@@ -277,10 +302,27 @@ export function cascadeSatisfyContainsParents(
 ): void {
   if (seen.has(nodeId)) return;
   seen.add(nodeId);
-  for (const parentId of rev.containedBy.get(nodeId) ?? []) {
+  // 上げる先は「自分を contains する親」だけではない。**自分を requires する親も
+  // 見る**——`contains` を持つ親には固有の作業が無いので、最後に埋まったのが
+  // 前提側でも「もうやることが無い」ことに変わりはない。`contains` を持たない親
+  // （純粋な前提関係）はここで弾かれるので、`requires` の意味は変わらない。
+  const parents = new Set([...(rev.containedBy.get(nodeId) ?? []), ...(rev.requiredBy.get(nodeId) ?? [])]);
+  for (const parentId of parents) {
     const parent = g.nodes[parentId];
     if (!parent || parent.satisfied) continue;
-    if (!parent.contains.every((childId) => g.nodes[childId]?.satisfied)) continue;
+    if (parent.contains.length === 0) continue; // 集約の対象は contains を持つ親だけ
+    // **前提も見る。** 子（contains）が揃っただけで親を立てると、その親に
+    // 未達の `requires` があっても達成にしてしまう（2026-09-02、実データで
+    // 目的が勝手に達成済みになった。`requires` と `contains` の両方を持つ
+    // ノードが実際に現れたのが初めてだった）。
+    //
+    // `resolveState()` は 2026-09-01 に「2種類のエッジはどちらも『何が必要か』
+    // を表す」として両方を見るようにしたが、カスケード側が追従していなかった。
+    // 判定の基準は1つでないと、導出とカスケードが別のことを言い始める。
+    const ready =
+      parent.contains.every((childId) => g.nodes[childId]?.satisfied) &&
+      parent.requires.every((reqId) => g.nodes[reqId]?.satisfied);
+    if (!ready) continue;
     parent.satisfied = true;
     cascadeSatisfyRequires(g, parentId);
     cascadeSatisfyContainsParents(g, parentId, rev, seen);
@@ -362,6 +404,97 @@ export function progress(g: Graph, nodeId: string): Progress {
     done: members.filter((id) => g.nodes[id]?.satisfied).length,
     total: members.length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// 下にあるものの見通し
+// ---------------------------------------------------------------------------
+
+/** 自分を除いた子孫の達成率。
+ *
+ * `progress()` との違いは自分を数に入れないことだけ。ノードそのものの状態は
+ * 色が言っているので、弧に混ぜると同じことを2つの入れ物で出すことになる。
+ *
+ * `requires` と `contains` の**両方**を辿る。分解のほとんどは `requires` なので、
+ * `contains` だけ見るとほぼ全ノードで「下に何も無い」ことになる（移植元は
+ * `contains` 限定で、それを持ち込んだまま1日走ったのが 2026-09-02 の棚卸しで
+ * 出た穴）。 */
+export function descendantProgress(g: Graph, nodeId: string): Progress {
+  const members = collectMembers(g, nodeId).filter((id) => id !== nodeId);
+  return {
+    done: members.filter((id) => g.nodes[id]?.satisfied).length,
+    total: members.length,
+  };
+}
+
+/** 下にあるものの一覧（両エッジを全階層辿って平らにしたもの）の1行。
+ *
+ * **並ぶのは「自分も下を持つノード」だけ。末端は出さない。** これは飛び先の
+ * メニューであってチェックリストではない——末端まで並べると実データで30行に
+ * なり、ホバーで出すには重すぎた（末端も出す形を一度試して戻した。2026-09-02）。
+ * 落とした役割は他が持っている: 配下で今やれるものは俯瞰、直下に何があるかは
+ * グラフ本体、下がどれだけ片付いたかは印の弧。 */
+export interface OutlineItem {
+  id: string;
+  /** 起点から何段下か。0 が直下の子。 */
+  depth: number;
+  /** 下が全部揃っているか。本体の `satisfied` をそのまま出すと、下が未完の
+   *  まま親だけ立っている状態を「済み」と読ませてしまう。 */
+  done: boolean;
+  /** 既に上の行で展開済み（複数の親から参照されている合流点）。2度目以降は
+   *  ぶら下がりを繰り返さないので、繰り返しだと行に出さないと「下が空の親」
+   *  と見分けがつかない。 */
+  repeat: boolean;
+}
+
+/**
+ * 下にあるものを全階層辿って平らにした一覧。グラフ本体が直下1ホップしか描かない
+ * ぶんを、ここで補う。
+ *
+ * **`requires` と `contains` の両方を辿る。** 移植元（Warframe 版）は `contains`
+ * だけを見ていたが、Sirube の分解はほとんどが `requires` なので、そのままだと
+ * 実データ16ノードのうち1つでしか開かない機能になっていた（2026-09-02 の
+ * 棚卸しで発覚）。弧・俯瞰・状態導出はどれも両エッジを見ており、ここだけ
+ * 守備範囲が違うのは移植の取り残しだった。
+ *
+ * **末端は並べない。** 辿るのは全部だが、行に積むのは自分も下を持つノードだけ
+ * ——移植元と同じ挙動。あちらのコメントは「末端も含む（チェックリストとして
+ * 読める）」と言っているが、実装は末端を落としており、**実装の方が後から
+ * 出した答え**だった（末端も並べる形を一度試したら、実データで 12行 → 30行 に
+ * 膨らんでホバーには重すぎた）。
+ *
+ * 合流点は最初に出てきた場所でだけ展開し、2度目以降は行だけ出して `repeat` を
+ * 立てる。展開を繰り返すと、DAG では同じ枝が何度も生えて一覧が実際の作業量より
+ * 膨らんで見える。
+ */
+export function descendantOutline(
+  g: Graph,
+  nodeId: string,
+  depth = 0,
+  seen: Set<string> = new Set(),
+): OutlineItem[] {
+  if (seen.has(nodeId)) return [];
+  seen.add(nodeId);
+  const node = g.nodes[nodeId];
+  if (!node) return [];
+  const out: OutlineItem[] = [];
+  for (const childId of [...node.requires, ...node.contains]) {
+    const child = g.nodes[childId];
+    if (!child) continue;
+    // 末端は行にしない。辿るのは続ける——末端の先に分岐点があることはないが、
+    // ここで打ち切ると合流点の `seen` が正しく積み上がらない。
+    if (child.requires.length + child.contains.length > 0) {
+      const c = descendantProgress(g, childId);
+      out.push({
+        id: childId,
+        depth,
+        done: c.total > 0 && c.done === c.total,
+        repeat: seen.has(childId),
+      });
+    }
+    out.push(...descendantOutline(g, childId, depth + 1, seen));
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

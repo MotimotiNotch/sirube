@@ -29,6 +29,17 @@
   --st-cyclic: #b06a12;
   --st-cyclic-bg: #fbf1e2;
 
+  /* 付箋（目的に貼る色）。状態の色（--st-*）と別系統だと一目で分かるよう、
+     紙に近い淡いトーンにしてある。形も分けてある——状態は丸、付箋は棒。
+     色に序列は無く、グレースケールでは互いに潰れるが、同じことを行の
+     パンくずが文字でも言っているので、色だけに頼ってはいない。 */
+  --tag-yellow: #f5d76e;
+  --tag-orange: #f0a868;
+  --tag-pink: #f0a0b8;
+  --tag-purple: #b9a3e3;
+  --tag-blue: #8fc0ea;
+  --tag-green: #94ce8f;
+
   --radius: 8px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
     "Noto Sans JP", "Yu Gothic UI", sans-serif;
@@ -53,6 +64,13 @@
     --st-blocked-bg: #1f2125;
     --st-cyclic: #ddaa55;
     --st-cyclic-bg: #2c2418;
+
+    --tag-yellow: #d4bc5f;
+    --tag-orange: #d19560;
+    --tag-pink: #d18fa3;
+    --tag-purple: #a494cc;
+    --tag-blue: #82abd0;
+    --tag-green: #85b581;
   }
 }
 
@@ -275,6 +293,15 @@ body.resizing { cursor: col-resize; user-select: none; }
   color: var(--fg-muted);
 }
 .breadcrumb button:hover { background: var(--bg-sunken); color: var(--fg); }
+
+/* 一覧とグラフの切り替え。行の右端に寄せる——左は「どこにいるか」の列なので、
+ * 場所を言う要素と操作を同じ流れに混ぜない。 */
+.crumb-toggle {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px 10px;
+}
 .breadcrumb .sep { color: var(--fg-faint); display: flex; }
 .breadcrumb .current { color: var(--fg); font-weight: 600; }
 
@@ -512,36 +539,212 @@ body.no-inspector #inspector-resizer {
 
 /* --- グラフ -------------------------------------------------------------- */
 
-/* ペインが広いときにグラフが左端へ寄らないよう中央に置く。折り返しの計算は
- * 収まる幅で済ませているので、ここは余白の配り方だけの話。 */
-.graph-wrap {
-  overflow: auto;
+/* グラフのときだけ中央ペインの余白と縦スクロールを外す。表示窓の中で拡大縮小
+ * と移動をやるので、外側にもスクロールがあると二重になる。 */
+.center-body.graph {
   display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  /* 凡例の「！」の基準。表示窓ではなくここに固定する（窓は子が無いと縮む）。 */
+  position: relative;
+}
+
+/* 表示窓。内容は中の <g> の transform だけで動かすので、ここはスクロールさせ
+ * ない。掴めることはカーソルで示す（掴んでいる間だけ握った形）。 */
+.graph-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+}
+.graph-wrap.dragging { cursor: grabbing; }
+/* 子が無いときは窓を伸ばさない（案内文がノードから離れる）。代わりに、
+ * 丸と案内文をひとかたまりのまま上下の auto マージンで縦中央へ寄せる。
+ * 伸ばさず・上端でもない、が要る——上端に貼ると下に 600px の空白が残る。 */
+.graph-wrap.short { flex: 0 0 140px; cursor: default; margin-top: auto; }
+.graph-wrap.short ~ .empty { margin-bottom: auto; }  /* 間に凡例が入るので隣接では届かない */
+.graph-wrap > svg { display: block; }
+/* 掴んでいる間はノードの上でも握った形のまま（指しているのではない）。 */
+.graph-wrap.dragging .graph-node { cursor: grabbing; }
+
+/* 凡例。左下に「！」を1つ置き、ホバーで開く（クリックで固定）。
+ * 常時出すと、ノードから追い出した文字がそのまま別の場所に戻ってくる。 */
+.legend-btn {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
   justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--bg-panel);
+  color: var(--fg-faint);
+  cursor: pointer;
 }
-.graph-node { cursor: pointer; }
-.graph-node .box {
-  fill: var(--bg-panel);
-  stroke: var(--border-strong);
-  stroke-width: 1;
-  rx: 7;
+.legend-btn:hover,
+.legend-btn.pinned { color: var(--fg); background: var(--bg-sunken); }
+
+.legend-panel {
+  position: absolute;
+  left: 10px;
+  bottom: 42px;
+  z-index: 3;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  /* 下にグラフの線が透けると見本と本物が重なって読めなくなるので不透明にする。 */
+  background: var(--bg-panel);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  font-size: 11px;
+  color: var(--fg-muted);
 }
-.graph-node.st-SATISFIED  .box { stroke: var(--st-satisfied);  fill: var(--st-satisfied-bg); }
-.graph-node.st-ACTIONABLE .box { stroke: var(--st-actionable); fill: var(--st-actionable-bg); stroke-width: 2; }
-.graph-node.st-BLOCKED    .box { stroke: var(--border-strong); fill: var(--bg-panel); }
-.graph-node.st-CYCLIC     .box { stroke: var(--st-cyclic);     fill: var(--st-cyclic-bg); stroke-dasharray: 4 3; }
-.graph-node.focused .box { stroke-width: 2.5; }
-.graph-node text { font-size: 12px; fill: var(--fg); user-select: none; }
-.graph-node .sub { font-size: 10px; fill: var(--fg-faint); }
+.legend-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+/* 見本は本物と同じ .graph-node クラスで描いて色を共有する。押せるものでは
+ * ないのでカーソルだけ戻す。 */
+.legend-mark { flex: none; overflow: visible; cursor: default; }
+.legend-merge {
+  width: 22px;
+  text-align: center;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.legend-sep { height: 1px; margin: 6px 0; background: var(--border); }
+
+/* 拡大率の表示 ＝ 元に戻すボタン。触るまでは出さない。 */
+.graph-reset {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.graph-reset:hover { color: var(--fg); background: var(--bg-sunken); }
+/* ノードは「印＋その下の名前」。状態色は印にだけ乗せ、名前は本文色のまま——
+ * 箱を状態色で塗っていた頃は、画面で一番うるさいものを自前で作っていた。
+ *
+ * 状態ごとの色は `color` に置いて、印と弧が `currentColor` で拾う。線の色を
+ * 状態×要素の組み合わせで書き下すと、状態が増えるたびに行数が倍で増える。 */
+.graph-node { cursor: pointer; color: var(--border-strong); }
+.graph-node.st-SATISFIED  { color: var(--st-satisfied); }
+.graph-node.st-ACTIONABLE { color: var(--st-actionable); }
+.graph-node.st-BLOCKED    { color: var(--border-strong); }
+.graph-node.st-CYCLIC     { color: var(--st-cyclic); }
+
+/* 名前まで含めた透明の当たり判定。印だけでは掴めない。 */
+.graph-node .hit { fill: transparent; }
+
+.graph-node .mark { fill: var(--bg-panel); stroke: currentColor; stroke-width: 2.5; }
+.graph-node.st-SATISFIED  .mark { fill: var(--st-satisfied-bg); }
+.graph-node.st-ACTIONABLE .mark { fill: var(--st-actionable-bg); stroke-width: 3; }
+.graph-node.st-CYCLIC     .mark { fill: var(--st-cyclic-bg); stroke-dasharray: 3 2.5; }
+.graph-node.focused .mark { stroke-width: 3.5; }
+
+/* 下に何がどれだけあるか。軌道は常に全周（「下がある」ことは弧が0でも伝わる
+ * 必要がある）、弧の長さが達成率。 */
+.graph-node .ring { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.graph-node .ring.track { stroke-opacity: 0.28; }
+.graph-node .ring.arc { stroke-linecap: round; }
+
+.graph-node text { font-size: 11px; fill: var(--fg); user-select: none; }
+/* 合流の数。印の肩に小さく。 */
+.graph-node .merge { font-size: 10px; fill: var(--fg-muted); font-variant-numeric: tabular-nums; }
 .graph-edge { stroke: var(--border-strong); fill: none; stroke-width: 1.4; }
 .graph-edge.contains { stroke-dasharray: 5 4; }
 .graph-edge.cyclic { stroke: var(--st-cyclic); stroke-width: 2; }
 .edge-label { font-size: 10px; fill: var(--fg-faint); }
 
+/* --- 中身の一覧（フライアウト） ------------------------------------------ */
+
+/* グラフのペインは overflow:auto なので、この箱だけは body 直下に置いて
+ * position:fixed で当てる。背景は半透明にしない——下にグラフの線が透けると
+ * 字下げの段が読めなくなる。 */
+.flyout {
+  position: fixed;
+  z-index: 60;
+  min-width: 200px;
+  max-width: 320px;
+  /* 飛び先だけを並べる形にしたら実データで12行に収まったので、そこまでは
+   * スクロールさせない。ホバーで出るものを掴んでスクロールさせるのは重い。 */
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+}
+.fly-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 6px;
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+.fly-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.fly-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--fg);
+}
+.fly-item .icon { color: var(--fg-faint); flex: none; }
+.fly-item .fly-done { color: var(--st-satisfied); }
+.fly-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fly-item:hover { background: var(--bg-sunken); }
+/* 潜れない行（末端・既出）はクリックできることを匂わせない。 */
+.fly-item.static { cursor: default; color: var(--fg-muted); }
+.fly-item.static:hover { background: none; }
+.fly-depth {
+  flex: none;
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg-faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.fly-tag { flex: none; color: var(--fg-faint); font-size: 10px; }
+
 /* --- インスペクタ -------------------------------------------------------- */
 
 .insp-empty { color: var(--fg-faint); padding-top: 40px; text-align: center; }
-.insp-name { font-size: 17px; font-weight: 600; margin: 0 0 8px; word-break: break-word; }
+.insp-name-row { display: flex; align-items: flex-start; gap: 4px; margin-bottom: 8px; }
+.insp-name { font-size: 17px; font-weight: 600; margin: 0; word-break: break-word; flex: 1 1 auto; cursor: text; }
+.insp-name-row .icon-btn { flex: none; margin-top: 2px; }
+.insp-rename {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  padding: 2px 8px;
+}
+
+/* 削除の確認。押した瞬間に消える操作なので、その場で一度受け止める。 */
+.insp-delete { margin-top: 18px; }
+.insp-confirm-text { font-size: 13px; color: var(--fg); }
+.insp-confirm-note { margin-top: 4px; font-size: 12px; color: var(--st-cyclic); }
 .insp-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .insp-section { margin-top: 18px; }
 .insp-section h4 {
@@ -650,6 +853,41 @@ body.no-inspector #inspector-resizer {
   word-break: break-all;
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* --- まとめて追加（DSL） -------------------------------------------------- */
+
+.dsl-help { margin: 8px 0 4px; font-size: 12px; color: var(--fg-muted); }
+.dsl-help summary { cursor: pointer; color: var(--fg-faint); }
+.dsl-help summary:hover { color: var(--fg-muted); }
+.dsl-help ul { margin: 8px 0; padding-left: 18px; }
+.dsl-help li { margin: 2px 0; }
+.dsl-help pre {
+  margin: 8px 0 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+.dsl-input { min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+/* 構文エラーは押す前に見せる。押してからトーストで返すと、どこが悪いのか
+ * 分からないまま同じ文字列を2回書くことになる。 */
+.hint.error { color: var(--st-cyclic); }
+
+/* --- 番号（#12） ---------------------------------------------------------- */
+
+/* 口に出して指すための札。静かに置く——情報の本体は状態の色なので、
+ * 番号が名前より目立つと読む順番が入れ替わる。 */
+.hit-number,
+.insp-number {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.insp-number { font-size: 12px; }
+
 .hidden { display: none !important; }
 
 .plan-list { margin: 0 0 8px; padding: 0; list-style: none; font-size: 13px; }
@@ -684,4 +922,87 @@ body.no-inspector #inspector-resizer {
   border-radius: 999px;
   font-size: 13px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+/* 付箋の帯 ------------------------------------------------------------- */
+/* 一覧の行。カードの左の縁を色で塗る。複数の目的に属するノードは、その数だけ
+   縦に割る（背景の linear-gradient を list-view.ts が組み立てる）。 */
+.hit { position: relative; overflow: hidden; }
+.hit-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+}
+/* サイドバーの目的行。こちらは行の縁ではなく内側に、角丸の短い棒で置く——
+   行そのものが選択でハイライトされるので、縁まで塗ると選択と競合する。 */
+.root-item { position: relative; }
+.goal-tag {
+  position: absolute;
+  left: 2px;
+  top: 7px;
+  bottom: 7px;
+  width: 4px;
+  border-radius: 2px;
+}
+
+/* インスペクタの色見本。付箋そのものに見えるよう角丸の四角にしてある
+   （状態の丸と形で分ける）。 */
+.swatch-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  cursor: pointer;
+}
+.swatch.on {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+}
+/* 実際の色。**`.swatch` より後に置くこと。** 詳細度が同じなので、前に置くと
+   `.swatch` の `background` に負けて色見本が全部無地になる（2026-09-03 に踏んだ）。
+   一覧の帯（.hit-tag）はここに書かない——複数の目的に属する行を縦に割るため、
+   background は list-view.ts が gradient として組み立てている。 */
+.goal-tag-yellow, .swatch-yellow { background: var(--tag-yellow); }
+.goal-tag-orange, .swatch-orange { background: var(--tag-orange); }
+.goal-tag-pink,   .swatch-pink   { background: var(--tag-pink); }
+.goal-tag-purple, .swatch-purple { background: var(--tag-purple); }
+.goal-tag-blue,   .swatch-blue   { background: var(--tag-blue); }
+.goal-tag-green,  .swatch-green  { background: var(--tag-green); }
+/* 「貼らない」。斜線1本で、色ではなく取り消しだと分かるようにする。 */
+.swatch-none {
+  position: relative;
+  overflow: hidden;
+}
+.swatch-none::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom right,
+    transparent 45%,
+    var(--fg-faint) 45%,
+    var(--fg-faint) 55%,
+    transparent 55%
+  );
+}
+
+/* 潜らずに選んだだけのノード。押しても絵が変わらないと「効いていない」に
+   見えるので、右パネルが今どれを出しているかをグラフ側にも出す。
+   フォーカス（中心）の二重丸とは別物なので、印は輪郭で分ける。 */
+.graph-node.selected .mark {
+  stroke-width: 3px;
+}
+.graph-node.selected .label {
+  fill: var(--fg);
+  font-weight: 600;
 }

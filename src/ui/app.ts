@@ -4,13 +4,16 @@
 // `SirubeFs` の実装を差し替える（開発中はメモリ、Tauri ではプラグイン fs）。
 
 import { analyzeCycles, buildReverseIndex, progress, resolveState, roots, type CycleInfo, type ReverseIndex } from "../core/engine.ts";
-import type { Graph } from "../core/model.ts";
+import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
+import { parseDsl } from "../core/dsl.ts";
 import { normalizeForDuplicateCheck, planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
-import { countActionable, nextActions, search } from "../core/search.ts";
+import { countActionable, nextActions, pathFromRoot, search } from "../core/search.ts";
 import type { SirubeFs } from "../store/fs.ts";
 import { MarkdownGraphStore } from "../store/store.ts";
 import { clear, el, h, iconSpan, stateDot, toast } from "./dom.ts";
+import { hideFlyout } from "./flyout.ts";
 import { renderGraph } from "./graph-view.ts";
+import { resetViewport } from "./graph-viewport.ts";
 import { renderInspector } from "./inspector.ts";
 import { renderList } from "./list-view.ts";
 
@@ -26,6 +29,18 @@ interface AppState {
   query: string;
   /** ドリルダウンの経路。パンくずと「戻る」に使う。 */
   trail: string[];
+  /** 読み込み時に拾ったファイルの問題（壊れた YAML・読めないファイル・番号の重複）。
+   *
+   * 以前はトーストで件数だけ出していたが、3.2秒で消えるので**起動直後に見て
+   * いなければ気づけず、中身も分からなかった**。自動解決の「判断が必要」へ
+   * 流す（2026-09-02）。 */
+  issues: { id: string; problems: string[] }[];
+  /** 一覧をこのノードの配下だけに絞る（目的の「俯瞰」）。
+   *
+   * 一覧は俯瞰モードであって潜る画面ではない（2026-09-02 のっち）。だから
+   * 目的の入口はこれまでどおり Chain View のままで、俯瞰はそこから切り替える
+   * ——入口を差し替えると、分解しに行く導線が1クリック遠くなる。 */
+  scopeId?: string;
 }
 
 export interface AppHandle {
@@ -56,6 +71,73 @@ export interface AppOptions {
   vault?: VaultInfo;
 }
 
+/** 前回開いていた場所の保存先。vault ごとには分けない——アプリは1つの vault を
+ *  指すので、同時に2つ開く経路が無い。 */
+const PLACE_KEY = "sirube.place";
+
+/** 保存するのは「どこを見ていたか」だけ。**検索語は入れない**——開いた瞬間に
+ *  絞り込まれた結果が出ると、前回の続きではなく前回の道具立てを復元することに
+ *  なる。選択（`selectedId`）も持たない。焦点と俯瞰先から導ける。 */
+interface SavedPlace {
+  mode: "list" | "graph";
+  focusId?: string;
+  trail: string[];
+  scopeId?: string;
+}
+
+function savePlace(state: AppState): void {
+  const place: SavedPlace = {
+    mode: state.mode,
+    ...(state.focusId ? { focusId: state.focusId } : {}),
+    trail: state.trail,
+    ...(state.scopeId ? { scopeId: state.scopeId } : {}),
+  };
+  try {
+    localStorage.setItem(PLACE_KEY, JSON.stringify(place));
+  } catch {
+    // 容量やプライベートモードで書けないことがある。場所を覚えられないだけで
+    // 操作は続けられるので、黙って諦める。
+  }
+}
+
+/**
+ * 前回の場所を state へ戻す。**「半年空けても道は残っている」道具なので、
+ * 次に開いたときに潜り直しから始まるのは筋が通らない**（のっち 2026-09-03）。
+ * TOP へはサイドバーとパンくずから常に1クリックで戻れるので、戻して困る場面は無い。
+ *
+ * 指していたノードが消えていることがある——外のエディタや git のマージで
+ * ファイルが減るのは日常の経路。**存在するものだけ通し、残りは黙って落とす。**
+ */
+function restorePlace(state: AppState): void {
+  let saved: Partial<SavedPlace> | undefined;
+  try {
+    const raw = localStorage.getItem(PLACE_KEY);
+    saved = raw === null ? undefined : (JSON.parse(raw) as Partial<SavedPlace>);
+  } catch {
+    return; // 壊れた値で起動を止める理由が無い
+  }
+  if (!saved || (saved.mode !== "list" && saved.mode !== "graph")) return;
+
+  const alive = (id: unknown): id is string => typeof id === "string" && state.graph.nodes[id] !== undefined;
+  state.trail = Array.isArray(saved.trail) ? saved.trail.filter(alive) : [];
+
+  if (saved.mode === "graph" && alive(saved.focusId)) {
+    state.mode = "graph";
+    state.focusId = saved.focusId;
+    // グラフに立つときは必ず何かを選んでいる（潜る操作が両方を同時に置く）。
+    // 復元でもそれを崩さない。崩すと、詳細パネルだけ空のグラフ画面ができる。
+    state.selectedId = saved.focusId;
+    return;
+  }
+  if (saved.mode === "list" && alive(saved.scopeId)) {
+    state.scopeId = saved.scopeId;
+    state.selectedId = saved.scopeId; // 俯瞰のパネルは絞っている目的そのものを指す
+    return;
+  }
+  // ここに来たら TOP。経路だけ残しても出す場所が無い。
+  state.trail = [];
+}
+
 export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<AppHandle> {
   const store = new MarkdownGraphStore(fs);
   const { graph, issues } = await store.load();
@@ -67,7 +149,10 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     mode: "list",
     query: "",
     trail: [],
+    issues,
   };
+
+  restorePlace(state);
 
   if (issues.length > 0) {
     toast(`${issues.length} 件のファイルに読み取り上の問題があります`);
@@ -116,9 +201,22 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   newRootBtn.append(iconSpan("plus", 15));
   newRootBtn.addEventListener("click", () => openNewGoal());
 
+  const importBtn = el<HTMLButtonElement>("import-btn");
+  importBtn.replaceChildren(iconSpan("plus", 14), document.createTextNode("まとめて追加"));
+  importBtn.addEventListener("click", () => openImport());
+
   const reconcileBtn = el<HTMLButtonElement>("reconcile-btn");
   reconcileBtn.replaceChildren(iconSpan("wandSparkles", 14), document.createTextNode("自動解決"));
   reconcileBtn.addEventListener("click", () => openReconcile());
+  // ファイルの問題だけはボタンに件数を出す。トーストは消えるので、
+  // 起動直後に見ていないと二度と気づけない。プランの件数を出さないのは、
+  // 描画のたびに Tarjan と収束ループを回すことになるため。
+  const renderIssueBadge = (): void => {
+    reconcileBtn.querySelector(".count")?.remove();
+    if (state.issues.length > 0) {
+      reconcileBtn.append(h("span", { class: "count" }, [String(state.issues.length)]));
+    }
+  };
 
   // ---- 操作 --------------------------------------------------------------
   /** 画面に出す名前。id は ULID なので、そのまま出すと読めない
@@ -141,15 +239,41 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   };
 
   const focusFresh = (id: string): void => {
-    state.trail = [];
+    // 入口が3つ（サイドバーの目的・一覧の行・インスペクタの上向きリンク）ある
+    // ので、`drill` と同じ番人をここにも置く。今はどの経路も実在するノードしか
+    // 渡さないが、片方にだけ番人がある状態は次に入口が増えたときに破れる。
+    if (!state.graph.nodes[id]) return;
+    // 「この目的から見直す」入口なので、拡大率と位置も初期に戻す。潜って移った
+    // ときと違い、ここは同じノードを選び直すことがある。
+    resetViewport();
+    // 目的からの経路をパンくずに積む。一覧から飛ぶと、**それが目的の中のどこ
+    // なのか画面のどこにも出ていなかった**（のっち報告 2026-09-03）。目的そのもの
+    // を押したときは経路が空なので、これまでどおり1段だけになる。
+    state.trail = pathFromRoot(state.graph, state.rev, id);
     state.focusId = id;
     state.selectedId = id;
     state.mode = "graph";
     render();
   };
 
-  const goList = (): void => {
+  const goList = (scopeId?: string): void => {
     state.mode = "list";
+    state.scopeId = scopeId;
+    // TOP へ戻るときは選択も手放す。一覧は「どれをやるか選ぶ」画面で、選択中の
+    // 印すら出さない——前の選択を抱えたままだと、画面のどこにも対応する相手が
+    // いない詳細パネルが3割を占め続ける（のっち報告 2026-09-03: 目的を1つ押すと、
+    // TOP へ戻っても右のパネルが開きっぱなしになる）。
+    //
+    // 俯瞰（scopeId あり）では残す。そちらのパネルは絞っている目的そのものを
+    // 指していて、進捗バーが「今どこの配下を見ているか」の手がかりになる。
+    if (!scopeId) state.selectedId = undefined;
+    // 俯瞰は「ここの下に何があるか」を見る操作なので、検索語が残っていたら捨てる。
+    // 検索は常に全体にかける決まりなので、語が残ったままだと俯瞰を押しても
+    // 検索結果のままになり、押した意味が消える（2026-09-02 に実機で踏んだ）。
+    if (scopeId && state.query !== "") {
+      state.query = "";
+      searchInput.value = "";
+    }
     render();
   };
 
@@ -160,6 +284,17 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     if (changed.length > 1) toast(`${changed.length} 件が連動して変わりました`);
   };
 
+  /** 付箋を貼る／外す。トーストは出さない——色は押した瞬間に画面へ出るので、
+   *  文字で結果を繰り返すと操作のたびに視界を塞ぐ。 */
+  const setColor = async (id: string, color: GoalColor | undefined): Promise<void> => {
+    const node = state.graph.nodes[id];
+    if (!node) return;
+    if (color === undefined) delete node.color;
+    else node.color = color;
+    await store.persist(state.graph, [id]);
+    render();
+  };
+
   const saveNote = async (id: string, note: string): Promise<void> => {
     const node = state.graph.nodes[id];
     if (!node) return;
@@ -167,6 +302,22 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     await store.persist(state.graph, [id]);
     syncMocs(); // 構造は変わらないが mtime は動くので、目的の並び順に効く
     toast("メモを保存しました");
+  };
+
+  const rename = async (id: string, name: string): Promise<void> => {
+    const before = nameOf(id);
+    try {
+      await store.renameNode(state.graph, id, name);
+    } catch (e) {
+      // 同名は作らせない。名前で参照を解決する経路（まとめて追加）があるので、
+      // 同じ名前が2つあるとどちらにも繋がずに止まる。
+      toast(e instanceof Error ? e.message : "名前を変えられませんでした");
+      render();
+      return;
+    }
+    recompute();
+    render();
+    if (nameOf(id) !== before) toast(`「${nameOf(id)}」に変えました`);
   };
 
   const removeNode = async (id: string): Promise<void> => {
@@ -413,6 +564,104 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     input.focus();
   };
 
+  /**
+   * DSL でまとめて構造を作る。
+   *
+   * 「前提を一括追加」が1つのノードの下に `requires` をフラットに生やすのに対し、
+   * こちらは**入れ子と合流を含む形をそのまま書き下す**ための入口。パーサ
+   * （`parseDsl`）もストア側（`importDsl`）も先にあったのに画面から呼ぶ道が無く、
+   * `AGENTS.md` はエージェントへ「アプリの一括生成に貼る」と案内していた——
+   * 存在しないドアを案内している状態だった（2026-09-02 の棚卸しで発覚）。
+   */
+  const openImport = (): void => {
+    clear(modal);
+    modal.append(h("h3", {}, ["まとめて追加"]));
+    modal.append(
+      h("p", { class: "hint" }, [
+        "分解を書き下すと、そのままノードとエッジになる。既にある名前を書けば、そのノードに繋がる（新しくは作られない）。Ctrl+Enter で追加。",
+      ]),
+    );
+
+    // 説明は初回しか読まれない。畳んで、必要な人だけ開く（表示量の原則3）。
+    const help = h("details", { class: "dsl-help" });
+    help.append(h("summary", {}, ["書き方"]));
+    const rules = h("ul");
+    for (const line of [
+      "X -> Y は「X には Y が必要」（requires）",
+      "[...] は直前のノードの中身（contains）。親 -> [子1] -> [子2] で兄弟が並ぶ",
+      ", で式を区切る。同じ名前は同じノードになる",
+    ]) {
+      rules.append(h("li", {}, [line]));
+    }
+    help.append(rules);
+    help.append(h("pre", {}, ["引っ越し -> 引っ越し先の家 -> 不動産に行く,\n引っ越し -> お金を貯める"]));
+    modal.append(help);
+
+    const ta = h("textarea", {
+      class: "dsl-input",
+      placeholder: "リリース -> 手順書, リリース -> CI/CD",
+    }) as HTMLTextAreaElement;
+    modal.append(ta);
+
+    const preview = h("div", { class: "hint", style: "margin-top:8px;font-size:12px" });
+    const updatePreview = (): void => {
+      const text = ta.value.trim();
+      if (text === "") {
+        preview.textContent = "";
+        preview.classList.remove("error");
+        return;
+      }
+      const parsed = parseDsl(ta.value);
+      if (parsed.errors.length > 0) {
+        // 構文エラーは押す前に見せる。押してからトーストで返すと、どこが悪いのか
+        // 分からないまま同じ文字列を2回書くことになる。
+        preview.textContent = parsed.errors[0]!.message;
+        preview.classList.add("error");
+        return;
+      }
+      preview.classList.remove("error");
+      // 既存に繋がるぶんと新しく起こすぶんを分けて出す。ここを1つの数にすると
+      // 「同じ名前を書いたのに新しく作られたのでは」という不安が残る。
+      const existing = new Set(Object.values(state.graph.nodes).map((n) => normalizeForDuplicateCheck(n.name)));
+      const fresh = parsed.nodes.filter((n) => !existing.has(normalizeForDuplicateCheck(n.id)));
+      const linked = parsed.nodes.length - fresh.length;
+      preview.textContent =
+        linked > 0
+          ? `${fresh.length} 件を新しく作り、${linked} 件は既存に繋ぎます`
+          : `${fresh.length} 件を新しく作ります`;
+    };
+    ta.addEventListener("input", updatePreview);
+    modal.append(preview);
+
+    const actions = h("div", { class: "modal-actions" });
+    const cancel = h("button", { class: "btn", type: "button" }, ["キャンセル"]);
+    cancel.addEventListener("click", closeModal);
+    const ok = h("button", { class: "btn primary", type: "button" }, ["追加"]);
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        ok.click();
+      }
+    });
+    ok.addEventListener("click", async () => {
+      const res = await store.importDsl(state.graph, ta.value);
+      if (res.errors.length > 0) {
+        toast(res.errors[0]!.message);
+        return;
+      }
+      recompute();
+      closeModal();
+      // 作った先へ飛ぶ。最初に書いたノードが、書き手にとっての起点。
+      const first = res.created[0] ?? res.updated[0];
+      if (first) focusFresh(first);
+      toast(`${res.created.length} 件を作り、${res.updated.length} 件に繋ぎました`);
+    });
+    actions.append(cancel, ok);
+    modal.append(actions);
+    backdrop.classList.remove("hidden");
+    ta.focus();
+  };
+
   const openBulkAdd = (targetId: string): void => {
     clear(modal);
     modal.append(h("h3", {}, [`「${nameOf(targetId)}」には何が必要？`]));
@@ -467,7 +716,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     clear(modal);
     modal.append(h("h3", {}, ["自動解決"]));
 
-    if (plan.fixes.length === 0 && plan.unresolved.length === 0) {
+    if (plan.fixes.length === 0 && plan.unresolved.length === 0 && state.issues.length === 0) {
       modal.append(h("p", { class: "hint" }, ["不整合はありませんでした。"]));
     } else {
       modal.append(
@@ -516,9 +765,38 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
           li.append(h("span", { class: "plan-kind" }, ["輪"]), `${u.nodes.map(nameOf).join(" → ")} → …（分解が要る）`);
         } else if (u.kind === "near-duplicate") {
           li.append(h("span", { class: "plan-kind" }, ["表記ゆれ"]), u.ids.map(nameOf).join(" / "));
+        } else if (u.kind === "contains-cycle") {
+          li.append(
+            h("span", { class: "plan-kind" }, ["内包の輪"]),
+            `${u.nodes.map(nameOf).join(" → ")} → …（割るのではなく、どれかの「これで構成」を外す）`,
+          );
+        } else if (u.kind === "oscillating") {
+          li.append(
+            h("span", { class: "plan-kind" }, ["決められない"]),
+            `${nameOf(u.node)} — 達成と未達成を行き来するので、どちらが正しいか手で決めてください`,
+          );
         } else {
-          li.append(h("span", { class: "plan-kind" }, ["時刻が同着"]), `${nameOf(u.node)} と ${nameOf(u.prerequisite)}`);
+          li.append(
+            h("span", { class: "plan-kind" }, ["時刻が近すぎる"]),
+            `${nameOf(u.node)} と ${nameOf(u.prerequisite)} — どちらが新しいか判断できません`,
+          );
         }
+        ul.append(li);
+      }
+      modal.append(ul);
+    }
+
+    // 読み取り時の問題。プランとは別立てにする——自動解決で直せるものではなく、
+    // ファイルを開いて人が直すものなので、同じ箱に入れると「実行」で消えると
+    // 誤解させる。
+    if (state.issues.length > 0) {
+      modal.append(
+        h("h4", { style: "margin:14px 0 4px;font-size:12px" }, [`ファイルの問題（${state.issues.length}）`]),
+      );
+      const ul = h("ul", { class: "plan-list" });
+      for (const i of state.issues) {
+        const li = h("li");
+        li.append(h("span", { class: "plan-kind" }, ["読めない"]), `${nameOf(i.id)} — ${i.problems.join(" / ")}`);
         ul.append(li);
       }
       modal.append(ul);
@@ -548,7 +826,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     const actionableCount = countActionable(state.graph, state.cycles);
     const nav = el<HTMLButtonElement>("nav-actionable");
     nav.replaceChildren();
-    nav.className = `nav-item${state.mode === "list" && state.query === "" ? " active" : ""}`;
+    // 俯瞰は「全体の今やれること」ではないので、ここは点かない。
+    nav.className = `nav-item${state.mode === "list" && state.query === "" && !state.scopeId ? " active" : ""}`;
     nav.append(iconSpan("listChecks", 15), document.createTextNode("今やれること"));
     nav.append(h("span", { class: "count" }, [String(actionableCount)]));
     nav.onclick = () => {
@@ -575,9 +854,13 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     for (const id of rootIds) {
       const p = progress(state.graph, id);
       const btn = h("button", {
-        class: `root-item${state.mode === "graph" && (state.trail[0] ?? state.focusId) === id ? " active" : ""}`,
+        class: `root-item${(state.mode === "graph" || state.scopeId) && (state.trail[0] ?? state.focusId) === id ? " active" : ""}`,
         type: "button",
       });
+      // 付箋は状態ドットの手前、行の縁に細く出す。丸（状態）と棒（付箋）で
+      // 形を分けてある——同じ形で色だけ違うと、2種類の色の意味が混ざる。
+      const tag = state.graph.nodes[id]?.color;
+      if (isGoalColor(tag)) btn.append(h("span", { class: `goal-tag goal-tag-${tag}` }));
       btn.append(stateDot(resolveState(state.graph, id, state.cycles.cyclic)));
       btn.append(h("span", {}, [state.graph.nodes[id]?.name ?? id]));
       btn.append(h("span", { class: "count" }, [`${p.done}/${p.total}`]));
@@ -589,50 +872,118 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   const renderBreadcrumb = (): void => {
     const bar = el("breadcrumb");
     clear(bar);
-    if (state.mode === "list") {
-      bar.append(h("span", { class: "current" }, [state.query === "" ? "今やれること" : `「${state.query}」の検索結果`]));
-      return;
-    }
-    const home = h("button", { type: "button" }, ["今やれること"]);
-    home.addEventListener("click", goList);
-    bar.append(home);
-    const path = [...state.trail, state.focusId].filter((x): x is string => !!x);
-    path.forEach((id, i) => {
+
+    /** 一覧とグラフを行き来する切り替え。パンくずの右端に置く。
+     *
+     * 同じ場所で往復するので、押した後に別の場所へ戻る形にはしない。
+     * 文字だけにしてあるのは、この行の左側（「今やれること」）が既に
+     * 文字ボタンで、アイコンを1つだけ混ぜると語彙が増えるため。 */
+    const appendToggle = (label: string, onClick: () => void): void => {
+      const btn = h("button", { class: "crumb-toggle", type: "button" }, [label]);
+      btn.addEventListener("click", onClick);
+      bar.append(btn);
+    };
+
+    const appendSep = (): void => {
       bar.append(h("span", { class: "sep" }, []));
       bar.lastElementChild!.append(iconSpan("chevronRight", 12));
-      if (i === path.length - 1) {
-        bar.append(h("span", { class: "current" }, [state.graph.nodes[id]?.name ?? id]));
-      } else {
+    };
+
+    /** 辿ってきた道を、その地点のグラフへ戻るボタンとして並べる。
+     *
+     * 俯瞰でも同じものを出す——絞る対象が変わっても**今どこにいるか**は
+     * 変わらないので、ここだけ道が消えると「どこの配下を見ているのか」の
+     * 手がかりが `◯◯ の配下` の1語だけになる。 */
+    const appendTrail = (): void => {
+      const home = h("button", { type: "button" }, ["今やれること"]);
+      home.addEventListener("click", () => goList());
+      bar.append(home);
+      state.trail.forEach((id, i) => {
+        appendSep();
         const btn = h("button", { type: "button" }, [state.graph.nodes[id]?.name ?? id]);
         btn.addEventListener("click", () => {
           state.trail = state.trail.slice(0, i);
           state.focusId = id;
           state.selectedId = id;
+          state.scopeId = undefined;
+          state.mode = "graph";
           render();
         });
         bar.append(btn);
+      });
+    };
+
+    if (state.mode === "list") {
+      const scopeId = state.scopeId;
+      const scope = scopeId ? state.graph.nodes[scopeId] : undefined;
+      if (scopeId && scope) {
+        appendTrail();
+        appendSep();
+        bar.append(h("span", { class: "current" }, [`${scope.name} の配下`]));
+        appendToggle("グラフ", () => {
+          state.mode = "graph";
+          state.scopeId = undefined;
+          state.focusId = scopeId;
+          render();
+        });
+        return;
       }
-    });
+      bar.append(h("span", { class: "current" }, [state.query === "" ? "今やれること" : `「${state.query}」の検索結果`]));
+      return;
+    }
+
+    appendTrail();
+    if (state.focusId) {
+      appendSep();
+      bar.append(h("span", { class: "current" }, [state.graph.nodes[state.focusId]?.name ?? state.focusId]));
+    }
+    // 今いる地点の配下を俯瞰する。目的で押せば目的の配下、潜った先で押せば
+    // その枝の配下——グラフが「1クリック1階層」なのに対して、こちらは
+    // 今いる場所から下を一息に見る。
+    const focusId = state.focusId;
+    if (focusId) appendToggle("俯瞰", () => goList(focusId));
   };
 
   const renderCenter = (): void => {
     const body = el("center-body");
+    // グラフは表示窓の中で拡大縮小・移動する。外側の余白とスクロールが
+    // 残っているとスクロールが二重になるので、モードで切り替える。
+    body.classList.toggle("graph", state.mode === "graph" && !!state.focusId);
     if (state.mode === "graph" && state.focusId) {
-      renderGraph(body, state.graph, state.focusId, state.rev, state.cycles.cyclic, { onSelect: select, onDrill: drill });
+      renderGraph(body, state.graph, state.focusId, state.rev, state.cycles.cyclic, { onSelect: select, onDrill: drill }, state.selectedId);
       return;
     }
+    // 検索は常に全体にかける。検索欄はヘッダーにある全体の道具なので、
+    // 俯瞰中だけ効き方が変わると、同じ場所で違う結果が出ることになる。
+    const scopeId = state.query === "" ? state.scopeId : undefined;
+    const scope = scopeId ? state.graph.nodes[scopeId] : undefined;
     const result =
       state.query === ""
-        ? nextActions(state.graph, state.rev, { cycles: state.cycles })
+        ? nextActions(state.graph, state.rev, { cycles: state.cycles, ...(scopeId ? { under: scopeId } : {}) })
         : search(state.graph, state.rev, { query: state.query, cycles: state.cycles });
     renderList(
       body,
       state.graph,
       result,
-      { title: state.query === "" ? "今やれること" : "検索結果", query: state.query },
+      {
+        title: state.query === "" ? "今やれること" : "検索結果",
+        query: state.query,
+        ...(scope ? { scoped: true } : {}),
+      },
       {
         onSelect: (id) => {
           select(id);
+          // 俯瞰から選んだときは、絞っていた目的を経路に残す。ここで経路ごと
+          // 捨てると、俯瞰で見つけた枝から目的へ戻れなくなる。
+          if (scopeId && scopeId !== id) {
+            state.trail = [scopeId];
+            state.focusId = id;
+            state.selectedId = id;
+            state.mode = "graph";
+            state.scopeId = undefined;
+            render();
+            return;
+          }
           focusFresh(id);
         },
         onDecompose: (cycle) => openBulkAdd(cycle[0]!),
@@ -641,20 +992,28 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   };
 
   const render = (): void => {
+    // 描き直しはすべての操作の終点なので、場所の保存もここに1つ置けば足りる。
+    savePlace(state);
+    // 中身の一覧はホバー元の要素にぶら下がっている。描き直すとその要素ごと
+    // 消えるので、ここで閉じる。グラフの描画側だけで閉じていると、一覧へ
+    // 切り替えたときに宙に浮いたまま残った（2026-09-02）。
+    hideFlyout();
     // 何も選んでいない間はインスペクタごと畳む。起動直後は「どれをやるか選ぶ」
     // 段階で、まだ詳細を見る相手がいない。空のパネルで画面の3割を占めるより、
     // 一覧に幅を渡す方がこの画面の仕事に合っている。
     document.body.classList.toggle("no-inspector", !state.selectedId || !state.graph.nodes[state.selectedId]);
+    renderIssueBadge();
     renderSidebar();
     renderBreadcrumb();
     renderCenter();
     renderInspector(el("inspector"), state.graph, state.selectedId, state.rev, state.cycles.cyclic, {
       onToggle: (id) => void toggle(id),
-      onSelect: select,
-      onDrill: drill,
+      onFocus: focusFresh,
       onBulkAdd: openBulkAdd,
       onNoteChange: (id, note) => void saveNote(id, note),
+      onRename: (id, name) => void rename(id, name),
       onDelete: (id) => void removeNode(id),
+      onColor: (id, color) => void setColor(id, color),
     });
   };
 
@@ -665,6 +1024,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     async reload() {
       const fresh = await store.load();
       state.graph = fresh.graph;
+      state.issues = fresh.issues;
       // 選択・フォーカスしていたノードが外部で消えていることがある。
       if (state.focusId && !state.graph.nodes[state.focusId]) {
         state.focusId = undefined;

@@ -2,7 +2,7 @@
 // 素の DOM に寄せる方が、バンドルもデバッグも軽い）。
 
 import { icon, type IconName } from "./icons.ts";
-import type { NodeState } from "../core/model.ts";
+import type { GoalColor, NodeState } from "../core/model.ts";
 
 export function el<T extends HTMLElement = HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -43,6 +43,18 @@ export const STATE_ICON: Record<NodeState, IconName> = {
   ACTIONABLE: "circle",
   BLOCKED: "circleSlash",
   CYCLIC: "repeat",
+};
+
+/** 付箋の色の呼び名。**色名だけを出す**——「重要」「あとで」のような意味を
+ *  こちらで決めない。何を意味するかは貼る人が決めるものなので、名前を付けた
+ *  時点でその自由が減る。 */
+export const COLOR_LABEL: Record<GoalColor, string> = {
+  yellow: "黄",
+  orange: "橙",
+  pink: "桃",
+  purple: "紫",
+  blue: "青",
+  green: "緑",
 };
 
 export function stateBadge(state: NodeState): HTMLSpanElement {

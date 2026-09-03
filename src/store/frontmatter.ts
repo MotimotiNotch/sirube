@@ -98,7 +98,9 @@ export function parseNodeFile(id: string, text: string, mtimeMs: number): ParseN
           satisfied: typeof loose?.satisfied === "boolean" ? loose.satisfied : false,
           requires: asStringArray(loose?.requires),
           contains: asStringArray(loose?.contains),
+          number: Number.isInteger(loose?.number) && (loose?.number as number) > 0 ? (loose?.number as number) : undefined,
           due: typeof loose?.due === "string" ? loose.due : undefined,
+          color: typeof loose?.color === "string" ? loose.color : undefined,
         };
       })();
 
@@ -109,7 +111,9 @@ export function parseNodeFile(id: string, text: string, mtimeMs: number): ParseN
   node.satisfied = fm.satisfied;
   node.requires = dedupe(fm.requires);
   node.contains = dedupe(fm.contains);
+  if (fm.number !== undefined) node.number = fm.number;
   if (fm.due !== undefined) node.due = fm.due;
+  if (fm.color !== undefined) node.color = fm.color;
   node.note = body;
   return { node, issues };
 }
@@ -149,10 +153,13 @@ export function serializeNodeFile(node: Node, nameOf?: (id: string) => string | 
   // 名前が id と同じなら書かない。移行前の vault のファイルを無意味に
   // 書き換えないための判断で、読み側は名前が無ければ id を名前として使う。
   if (node.name !== node.id) fm.name = node.name;
+  // 番号は名前の次。人が最初に読む2つを上に固めておく。
+  if (node.number !== undefined) fm.number = node.number;
   fm.satisfied = node.satisfied;
   fm.requires = node.requires;
   fm.contains = node.contains;
   if (node.due !== undefined && node.due !== "") fm.due = node.due;
+  if (node.color !== undefined && node.color !== "") fm.color = node.color;
 
   const yamlText = annotate(
     yaml.dump(fm, {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { analyzeCycles, buildReverseIndex } from "./engine.ts";
 import { parseDsl } from "./dsl.ts";
-import { GOALS_DIR, INDEX_DOC, renderMocs, type GeneratedDoc } from "./moc.ts";
+import { AGENTS_DOC_PATH, GOALS_DIR, INDEX_DOC, renderMocs, type GeneratedDoc } from "./moc.ts";
 import { newGraph, newNode, type Graph } from "./model.ts";
 import { assertDocPath, MemoryFs } from "../store/fs.ts";
 import { MarkdownGraphStore } from "../store/store.ts";
@@ -28,8 +28,44 @@ describe("MOC 3層の生成", () => {
   test("層1・層3・目的ごとの層2が出る", () => {
     const docs = render(g("引っ越し -> 家 -> 不動産, 確定申告 -> 領収書整理"));
     expect(docs.map((d) => d.path).sort()).toEqual(
-      [INDEX_DOC, "90_達成済み.md", `${GOALS_DIR}/引っ越し の道.md`, `${GOALS_DIR}/確定申告 の道.md`].sort(),
+      [
+        INDEX_DOC,
+        "90_達成済み.md",
+        AGENTS_DOC_PATH, // エージェント向けの仕様書も vault に置く
+        `${GOALS_DIR}/引っ越し_の道.md`,
+        `${GOALS_DIR}/確定申告_の道.md`,
+      ].sort(),
     );
+  });
+
+  test("目的名に何が来ても、ファイル名に空白と特殊文字を出さない", () => {
+    // DSL は `[` を contains の記法として食うので、ノードを直接組む。
+    const graph = newGraph();
+    const node = newNode("01TEST");
+    node.name = "Sirube [WIP]: v1.0 リリース";
+    graph.nodes[node.id] = node;
+
+    const goal = render(graph).find((d) => d.path.startsWith(`${GOALS_DIR}/`))!;
+
+    // 「含まれない」だけを見る検査は、検出器が壊れていても通る（2026-09-02 に
+    // 正規表現がバックスペース文字に化けていた実例あり）。出る形そのものを固定する。
+    expect(goal.path).toBe(`${GOALS_DIR}/Sirube_WIP_v1.0_リリース_の道.md`);
+    expect(goal.path).not.toMatch(/[\s[\]#^]/);
+  });
+
+  test("潰した結果が衝突したら連番で避ける", () => {
+    const graph = newGraph();
+    for (const [id, name] of [["01A", "A/B"], ["01B", "A:B"]] as const) {
+      const node = newNode(id);
+      node.name = name;
+      graph.nodes[id] = node;
+    }
+
+    const paths = render(graph)
+      .map((d) => d.path)
+      .filter((p) => p.startsWith(`${GOALS_DIR}/`))
+      .sort();
+    expect(paths).toEqual([`${GOALS_DIR}/A_B_の道.md`, `${GOALS_DIR}/A_B_の道_2.md`]);
   });
 
   test("生成物は nodes/ の外にしか置かない", () => {
@@ -47,7 +83,7 @@ describe("MOC 3層の生成", () => {
     expect(doc(docs, INDEX_DOC)).not.toContain("[[確定申告]]");
     expect(doc(docs, "90_達成済み.md")).toContain("[[確定申告]]");
     // 層2は進行中のぶんだけ作る（達成した目的の「道」は残さない）
-    expect(docs.some((d) => d.path === `${GOALS_DIR}/確定申告 の道.md`)).toBe(false);
+    expect(docs.some((d) => d.path === `${GOALS_DIR}/確定申告_の道.md`)).toBe(false);
     // 戻し方が書いてある＝復元は satisfied を戻すだけで、移動も復元操作も無い
     expect(doc(docs, "90_達成済み.md")).toContain("`satisfied` を `false`");
   });
@@ -68,7 +104,7 @@ describe("MOC 3層の生成", () => {
     const graph = g("ポートフォリオを公開する -> 実績を作る -> 案件を取る -> 実績を作る");
     const docs = render(graph);
     expect(doc(docs, INDEX_DOC)).toContain("輪で詰まっています");
-    expect(doc(docs, `${GOALS_DIR}/ポートフォリオを公開する の道.md`)).toContain("輪で詰まっています");
+    expect(doc(docs, `${GOALS_DIR}/ポートフォリオを公開する_の道.md`)).toContain("輪で詰まっています");
   });
 
   test("今やれることが無いとき、理由が必ず出る（全部揃っている）", () => {
@@ -81,7 +117,7 @@ describe("MOC 3層の生成", () => {
   test("層2に出るのは直下の子だけ。孫は出さない", () => {
     // 子孫を全列挙すると結局また網羅になる。降りる先はノードのファイル。
     const graph = g("引っ越し -> 家 -> 不動産 -> 内見の予約を取る");
-    const goal = doc(render(graph), `${GOALS_DIR}/引っ越し の道.md`);
+    const goal = doc(render(graph), `${GOALS_DIR}/引っ越し_の道.md`);
     const needs = goal.slice(goal.indexOf("## これには何が必要か"), goal.indexOf("## 今やれること"));
     expect(needs).toContain("[[家]]");
     expect(needs).not.toContain("[[不動産]]");
@@ -91,7 +127,7 @@ describe("MOC 3層の生成", () => {
 
   test("今やれることは合流点（入次数）の大きい順", () => {
     const graph = g("目的 -> 枝A -> 合流, 目的 -> 枝B -> 合流, 目的 -> ただの葉");
-    const goal = doc(render(graph), `${GOALS_DIR}/目的 の道.md`);
+    const goal = doc(render(graph), `${GOALS_DIR}/目的_の道.md`);
     // 「これには何が必要か」節にも同じリンクが出るので、比べるのは該当節の中だけ。
     const actionable = goal.slice(goal.indexOf("## 今やれること"));
     expect(actionable.indexOf("[[合流]]")).toBeLessThan(actionable.indexOf("[[ただの葉]]"));
@@ -128,14 +164,14 @@ describe("生成物の後始末", () => {
     const graph = g("引っ越し -> 家, 確定申告 -> 領収書整理");
 
     await store.regenerateMocs(graph);
-    expect(await fs.listDocs(GOALS_DIR)).toContain("確定申告 の道.md");
+    expect(await fs.listDocs(GOALS_DIR)).toContain("確定申告_の道.md");
 
     // 目的が消えたら、その「道」も残さない。存在しない目的の道が並ぶと
     // 入口としての信頼が落ちる。
     delete graph.nodes["確定申告"];
     delete graph.nodes["領収書整理"];
     await store.regenerateMocs(graph);
-    expect(await fs.listDocs(GOALS_DIR)).toEqual(["引っ越し の道.md"]);
+    expect(await fs.listDocs(GOALS_DIR)).toEqual(["引っ越し_の道.md"]);
   });
 
   test("生成物はノードの一覧に混ざらない", async () => {

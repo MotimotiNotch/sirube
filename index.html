@@ -20,6 +20,7 @@
         />
       </div>
       <button class="btn hidden" id="vault-btn" type="button"></button>
+      <button class="btn" id="import-btn" type="button">まとめて追加</button>
       <button class="btn" id="reconcile-btn" type="button">自動解決</button>
     </header>
 
@@ -47,6 +48,10 @@
     <div class="modal-backdrop hidden" id="modal-backdrop">
       <div class="modal" id="modal"></div>
     </div>
+
+    <!-- 中身の一覧。.graph-wrap は overflow:auto なので、中に置くとクリップされる。
+         body 直下に1つ置いて position:fixed で当てる。 -->
+    <div class="flyout hidden" id="flyout"></div>
 
     <div class="toast-stack" id="toast-stack"></div>
 

@@ -32,6 +32,9 @@ const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(async () => {
   document.body.innerHTML = HTML;
+  // 前回開いていた場所は localStorage に残る。消さないと直前のテストが潜って
+  // いた先から始まる（復元を入れた 2026-09-03 に実際3件が落ちた）。
+  localStorage.clear();
   await startApp(sampleFs());
 });
 
@@ -107,6 +110,41 @@ describe("検索", () => {
     // ので、文字ではなくチップの存在で確かめる。
     expect($("center-body").querySelectorAll(".neighbors .chip").length).toBeGreaterThan(0);
   });
+
+  test("番号で引ける（#12 でも 12 でも）", async () => {
+    const input = $("search-input") as HTMLInputElement;
+    input.value = "#1";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    const first = $("center-body").querySelector(".hit-number")?.textContent;
+    expect(first).toBe("#1");
+
+    input.value = "1";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    // 番号一致は先頭に来る。名前に同じ数字を含む行より先でないと用を成さない。
+    expect($("center-body").querySelector(".hit-number")?.textContent).toBe("#1");
+  });
+
+  test("番号は行の先頭に出て、インスペクタにも出る", async () => {
+    $("nav-actionable").click();
+    await tick();
+    const numbers = Array.from($("center-body").querySelectorAll(".hit-number")).map((e) => e.textContent);
+    expect(numbers.length).toBeGreaterThan(0);
+    expect(numbers.every((n) => /^#\d+$/.test(n ?? ""))).toBe(true);
+    ($("center-body").querySelector(".hit-main") as HTMLButtonElement).click();
+    await tick();
+    expect($("inspector").querySelector(".insp-number")?.textContent).toMatch(/^#\d+$/);
+  });
+
+  test("グラフのノードには番号を出さない", async () => {
+    // ノードから文字を追い出した直後なので、そこに番号を戻すと元の木阿弥。
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    const svg = $("center-body").querySelector(".graph-wrap svg")!.cloneNode(true) as SVGSVGElement;
+    svg.querySelectorAll("title").forEach((t) => t.remove());
+    expect(svg.textContent).not.toContain("#");
+  });
 });
 
 describe("ドリルダウンとインスペクタ", () => {
@@ -116,6 +154,104 @@ describe("ドリルダウンとインスペクタ", () => {
     expect(text("breadcrumb")).toContain("Sirube をリリースする");
     expect($("center-body").querySelector("svg")).toBeTruthy();
     expect(text("inspector")).toContain("Sirube をリリースする");
+  });
+
+  test("一覧へ戻ると詳細パネルは畳む。俯瞰では残す", async () => {
+    // 起動直後は何も選んでいないので畳まれている。
+    expect(document.body.classList.contains("no-inspector")).toBe(true);
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    expect(document.body.classList.contains("no-inspector")).toBe(false);
+
+    // TOP へ戻ったら選択ごと手放す。一覧は選択中の印を出さないので、パネルだけが
+    // 前の選択を指して残ると、画面のどこにも相手がいないまま3割を占める
+    // （のっち報告 2026-09-03: 目的を1つ押すと以後ずっと開いたままになった）。
+    $("nav-actionable").click();
+    await tick();
+    expect(document.body.classList.contains("no-inspector")).toBe(true);
+
+    // 俯瞰は別。パネルは絞っている目的そのものを指していて、進捗バーが
+    // 「今どこの配下を見ているか」の手がかりになる。
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    buttonsIn("breadcrumb").find((b) => b.textContent === "俯瞰")!.click();
+    await tick();
+    expect(document.body.classList.contains("no-inspector")).toBe(false);
+  });
+
+  test("一覧から飛ぶと、目的からの経路がパンくずに出る", async () => {
+    // 飛んだ先が目的の中のどこなのか、画面のどこにも出ていなかった
+    // （のっち報告 2026-09-03）。
+    $("nav-actionable").click();
+    await tick();
+    (Array.from($("center-body").querySelectorAll(".hit-main")).find((b) =>
+      (b.textContent ?? "").includes("READMEとマニュアルを書く"),
+    ) as HTMLButtonElement).click();
+    await tick();
+
+    const crumb = text("breadcrumb");
+    expect(crumb).toContain("Sirube をリリースする");
+    expect(crumb).toContain("READMEとマニュアルを書く");
+    // 経路の順は目的 → 現在地。逆に出ると「どこから来たか」が読めない。
+    expect(crumb.indexOf("Sirube をリリースする")).toBeLessThan(crumb.indexOf("READMEとマニュアルを書く"));
+    // 積んだ先は押して戻れる（ただのラベルにしない）
+    expect(findButton("breadcrumb", "Sirube をリリースする")).toBeTruthy();
+  });
+
+  test("目的そのものを押したときは経路を積まない", async () => {
+    // 目的の上には何も無い。空の段が増えると、1段目がいつも無意味になる。
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    expect(text("breadcrumb")).toContain("確定申告");
+    expect($("breadcrumb").querySelectorAll(".sep").length).toBe(1);
+  });
+
+  test("「属する先」を押すと、グラフもパンくずも一緒に親へ移る", async () => {
+    // 右パネルだけ差し替えていたので、画面の3箇所が食い違っていた
+    // （のっち報告 2026-09-03）。ここは合流ノードから他の親へ渡る唯一の道でもある。
+    $("nav-actionable").click();
+    await tick();
+    (Array.from($("center-body").querySelectorAll(".hit-main")).find((b) =>
+      (b.textContent ?? "").includes("検索と横断ビュー"),
+    ) as HTMLButtonElement).click();
+    await tick();
+    expect(text("breadcrumb")).toContain("検索と横断ビュー");
+
+    findButton("inspector", "MVP実装完了")!.click();
+    await tick();
+
+    expect($("inspector").querySelector(".insp-name")!.textContent).toBe("MVP実装完了");
+    // パンくずの現在地が入れ替わる。押す前のノードが末尾に残っていると、
+    // どこにいるのか読めない。
+    expect($("breadcrumb").querySelector(".current")!.textContent).toBe("MVP実装完了");
+    // グラフの中心も一緒に移る
+    expect($("center-body").querySelector("g.graph-node.focused")!.textContent).toContain("MVP実装完了");
+  });
+
+  test("「これを待っている」から、合流点を経由して別の親へ渡れる", async () => {
+    // ここが上向きリンクを残してある理由そのもの。合流ノードの他の親には、
+    // グラフ（下向きしか描かない）からもパンくず（辿ってきた道だけ）からも
+    // 到達できない。
+    $("nav-actionable").click();
+    await tick();
+    (Array.from($("center-body").querySelectorAll(".hit-main")).find((b) =>
+      (b.textContent ?? "").includes("検索と横断ビュー"),
+    ) as HTMLButtonElement).click();
+    await tick();
+
+    // 新リポジトリを作る は末端なので、押しても潜らず選ばれるだけ
+    (Array.from($("center-body").querySelectorAll("g.graph-node")).find((g) =>
+      (g.textContent ?? "").includes("新リポジトリを作る"),
+    ) as unknown as SVGGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    expect($("breadcrumb").querySelector(".current")!.textContent).toBe("検索と横断ビュー");
+
+    // ここから、同じ前提を要求している別のノードへ渡る
+    findButton("inspector", "整合性の自動解決")!.click();
+    await tick();
+    expect($("breadcrumb").querySelector(".current")!.textContent).toBe("整合性の自動解決");
+    expect($("center-body").querySelector("g.graph-node.focused")!.textContent).toContain("整合性の自動解決");
+    expect($("inspector").querySelector(".insp-name")!.textContent).toBe("整合性の自動解決");
   });
 
   test("インスペクタから達成にすると前提まで連動する", async () => {
@@ -141,6 +277,535 @@ describe("ドリルダウンとインスペクタ", () => {
     await tick();
     expect(text("inspector")).toContain("輪の上にいます");
     expect(text("inspector")).toContain("2つに割る");
+  });
+});
+
+describe("下にあるものの一覧（フライアウト）", () => {
+  /** グラフの `<g class="graph-node">` を表示名（`<title>`）で引く。 */
+  const graphNode = (name: string): SVGGElement | undefined =>
+    Array.from($("center-body").querySelectorAll("g.graph-node")).find(
+      (g) => g.querySelector("title")?.textContent === name,
+    ) as SVGGElement | undefined;
+
+  test("下があるノードにホバーすると全階層の一覧が出る", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    // グラフは直下1ホップしか描かないので、MVP実装完了 の下はここに出ていない。
+    expect(text("center-body")).not.toContain("Markdownノードストア");
+
+    graphNode("MVP実装完了")!.dispatchEvent(new Event("mouseenter"));
+    expect($("flyout").classList.contains("hidden")).toBe(false);
+    expect(text("flyout")).toContain("Markdownノードストア");
+    expect(text("flyout")).toContain("Tauriシェル");
+  });
+
+  test("requires の下でも開く（contains 限定にしない）", async () => {
+    // ここが contains 限定だった間、実データ16ノードのうち1つでしか
+    // 開かない機能になっていた（2026-09-02 の棚卸しで発覚）。
+    // MVP実装完了 は目的の requires 側にぶら下がっている。
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    graphNode("Sirube をリリースする")!.dispatchEvent(new Event("mouseenter"));
+    expect($("flyout").classList.contains("hidden")).toBe(false);
+    expect(text("flyout")).toContain("MVP実装完了");
+  });
+
+  test("末端にはホバーしても出ない", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    graphNode("領収書整理")!.dispatchEvent(new Event("mouseenter"));
+    expect($("flyout").classList.contains("hidden")).toBe(true);
+  });
+
+  test("下が末端しか無いノードでも出ない", async () => {
+    // 一覧は飛び先のメニューなので、飛び先が無ければ出す意味がない。
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    graphNode("確定申告")!.dispatchEvent(new Event("mouseenter"));
+    expect($("flyout").classList.contains("hidden")).toBe(true);
+  });
+
+  test("並ぶのは飛び先だけ。末端は一覧に出さない", async () => {
+    // 末端まで並べると実データで 12行 → 30行 に膨らみ、ホバーには重すぎた。
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    graphNode("MVP実装完了")!.dispatchEvent(new Event("mouseenter"));
+    const items = Array.from($("flyout").querySelectorAll(".fly-item"));
+    expect(items.length).toBeGreaterThan(0);
+    // 末端（新リポジトリを作る）は行にならない
+    expect(items.some((el) => (el.textContent ?? "").includes("新リポジトリを作る"))).toBe(false);
+    // 並んでいる行はどれも潜れる
+    expect(items.every((el) => !el.classList.contains("static"))).toBe(true);
+    const nested = items.find((el) => (el.textContent ?? "").includes("Markdownノードストア"))!;
+    (nested as HTMLElement).click();
+    await tick();
+    expect(text("breadcrumb")).toContain("Markdownノードストア");
+  });
+
+  test("描き直すと開いたままにならない", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    graphNode("MVP実装完了")!.dispatchEvent(new Event("mouseenter"));
+    expect($("flyout").classList.contains("hidden")).toBe(false);
+    // ホバー元の要素ごと消える描き直しで、宙に浮いたまま残らないこと。
+    $("nav-actionable").click();
+    await tick();
+    expect($("flyout").classList.contains("hidden")).toBe(true);
+  });
+});
+
+describe("グラフの拡大縮小と移動", () => {
+  const wrap = (): HTMLElement => $("center-body").querySelector(".graph-wrap") as HTMLElement;
+  const view = (): SVGGElement => $("center-body").querySelector(".graph-wrap svg > g") as SVGGElement;
+  const transform = (): string => view().getAttribute("transform") ?? "";
+  const scale = (): number => Number(/scale\(([-\d.]+)\)/.exec(transform())?.[1] ?? "1");
+  const translate = (): [number, number] => {
+    const m = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(transform());
+    return [Number(m?.[1] ?? 0), Number(m?.[2] ?? 0)];
+  };
+  const drag = (dx: number, dy: number): void => {
+    wrap().dispatchEvent(new MouseEvent("mousedown", { button: 0, clientX: 100, clientY: 100, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 100 + dx, clientY: 100 + dy }));
+    window.dispatchEvent(new MouseEvent("mouseup", {}));
+  };
+
+  beforeEach(async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+  });
+
+  test("グラフのときは中央ペインのスクロールを外す（二重スクロールにしない）", () => {
+    expect($("center-body").classList.contains("graph")).toBe(true);
+    $("nav-actionable").click();
+    expect($("center-body").classList.contains("graph")).toBe(false);
+  });
+
+  test("スクロールで拡大縮小する", () => {
+    expect(scale()).toBe(1);
+    wrap().dispatchEvent(new WheelEvent("wheel", { deltaY: -300, clientX: 50, clientY: 50, bubbles: true }));
+    expect(scale()).toBeGreaterThan(1);
+    wrap().dispatchEvent(new WheelEvent("wheel", { deltaY: 600, clientX: 50, clientY: 50, bubbles: true }));
+    expect(scale()).toBeLessThan(1);
+  });
+
+  test("ピンチ（ctrlKey）は同じ移動量でもよく効く", () => {
+    // ブラウザはピンチのときだけ wheel に ctrlKey を立てる。送られてくる
+    // deltaY はホイール1目盛りより一桁小さいので、同じ係数だと指を大きく
+    // 開いてもほとんど動かない。
+    //
+    // happy-dom の `WheelEvent` は `ctrlKey` を落とす（`undefined` になる）ので、
+    // ここだけ手で立てる。落ちた側は falsy になり通常のホイール扱いなので、
+    // 既定の倒れ方も安全。
+    const step = (pinch: boolean): number => {
+      const btn = $("center-body").querySelector(".graph-reset") as HTMLButtonElement;
+      btn.click(); // 一度リセットしてから測る
+      const ev = new WheelEvent("wheel", { deltaY: -10, clientX: 50, clientY: 50, bubbles: true });
+      Object.defineProperty(ev, "ctrlKey", { value: pinch });
+      wrap().dispatchEvent(ev);
+      return scale();
+    };
+    expect(step(true)).toBeGreaterThan(step(false));
+  });
+
+  test("ピンチでもページごと拡大されない（既定動作を止めている）", () => {
+    const ev = new WheelEvent("wheel", { deltaY: -100, clientX: 50, clientY: 50, ctrlKey: true, bubbles: true, cancelable: true });
+    wrap().dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  test("拡大率には上限と下限がある", () => {
+    for (let i = 0; i < 40; i += 1) {
+      wrap().dispatchEvent(new WheelEvent("wheel", { deltaY: -600, clientX: 50, clientY: 50, bubbles: true }));
+    }
+    expect(scale()).toBeLessThanOrEqual(3);
+    for (let i = 0; i < 80; i += 1) {
+      wrap().dispatchEvent(new WheelEvent("wheel", { deltaY: 600, clientX: 50, clientY: 50, bubbles: true }));
+    }
+    expect(scale()).toBeGreaterThanOrEqual(0.3);
+  });
+
+  test("ドラッグで動かせる", () => {
+    const [x0, y0] = translate();
+    drag(40, -25);
+    const [x1, y1] = translate();
+    expect(x1 - x0).toBe(40);
+    expect(y1 - y0).toBe(-25);
+  });
+
+  test("手ぶれ程度の動きはドラッグにしない（ノードが選べなくなるため）", () => {
+    const before = transform();
+    drag(2, 1);
+    expect(transform()).toBe(before);
+  });
+
+  test("触ると拡大率が出て、押すと元に戻る", async () => {
+    const before = transform();
+    expect(($("center-body").querySelector(".graph-reset") as HTMLElement).classList.contains("hidden")).toBe(true);
+    wrap().dispatchEvent(new WheelEvent("wheel", { deltaY: -300, clientX: 50, clientY: 50, bubbles: true }));
+    const btn = $("center-body").querySelector(".graph-reset") as HTMLButtonElement;
+    expect(btn.classList.contains("hidden")).toBe(false);
+    expect(btn.textContent).toMatch(/^\d+%$/);
+    btn.click();
+    expect(transform()).toBe(before);
+    expect(btn.classList.contains("hidden")).toBe(true);
+  });
+
+  test("掴んで動かした指をノードの上で離しても、そのノードへ潜らない", async () => {
+    const node = Array.from($("center-body").querySelectorAll("g.graph-node")).find(
+      (g) => g.querySelector("title")?.textContent === "MVP実装完了",
+    )!;
+    const before = text("breadcrumb");
+    drag(40, 0);
+    node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    expect(text("breadcrumb")).toBe(before);
+
+    // 飲むのは1回だけ。次の普通のクリックは通る。
+    node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    expect(text("breadcrumb")).toContain("MVP実装完了");
+  });
+
+  test("窓の外で指を離してクリックが来なくても、合図は次に押した時点で消える", async () => {
+    // 残ると「次に押したものが何であれ1回飲まれる」ことになる。
+    drag(40, 0);
+    const node = Array.from($("center-body").querySelectorAll("g.graph-node")).find(
+      (g) => g.querySelector("title")?.textContent === "MVP実装完了",
+    )!;
+    // クリックを挟まずにもう一度押す（＝掴み直す）と合図は捨てられる。
+    drag(1, 0);
+    node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    expect(text("breadcrumb")).toContain("MVP実装完了");
+  });
+
+  test("描き直しでは表示が飛ばず、潜ると初期位置に戻る", async () => {
+    wrap().dispatchEvent(new WheelEvent("wheel", { deltaY: -300, clientX: 50, clientY: 50, bubbles: true }));
+    const zoomed = scale();
+    // 達成のトグルでも描き直しは走る。そのたびに戻ると手元が飛ぶ。
+    findButton("inspector", "達成にする")!.click();
+    await tick();
+    expect(scale()).toBe(zoomed);
+    // 別のノードへ潜ったら初期位置から。
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    expect(scale()).toBe(1);
+  });
+});
+
+describe("Chain View の表示量", () => {
+  beforeEach(async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    Array.from($("center-body").querySelectorAll("g.graph-node"))
+      .find((g) => g.querySelector("title")?.textContent === "MVP実装完了")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+  });
+
+  test("ノードの中に文字を書かない（名前は印の下、状態は色）", () => {
+    // 箱の中に名前と数字を入れていた頃は、6個並ぶとカードの列に見えていた。
+    const nodes = Array.from($("center-body").querySelectorAll("g.graph-node"));
+    expect(nodes.length).toBeGreaterThan(1);
+    expect($("center-body").querySelectorAll("g.graph-node .box").length).toBe(0);
+    expect($("center-body").querySelectorAll("g.graph-node .mark").length).toBe(nodes.length);
+    for (const g of nodes) {
+      expect(g.querySelector(".label")?.textContent).toBeTruthy();
+    }
+  });
+
+  test("画面に文字で出るのはノード名・合流の数・段のラベルだけ", () => {
+    // `下にN` は弧に置き換えた。数はツールチップへ逃がしてある——`<title>` は
+    // 画面に出ないので、数えるときは落としてから見る。
+    const svg = $("center-body").querySelector(".graph-wrap svg")!.cloneNode(true) as SVGSVGElement;
+    svg.querySelectorAll("title").forEach((t) => t.remove());
+    const classes = new Set(
+      Array.from(svg.querySelectorAll("text")).map((t) => t.getAttribute("class") ?? ""),
+    );
+    expect([...classes].sort()).toEqual(["edge-label", "label"]);
+    expect(svg.textContent).not.toContain("下に");
+    expect(svg.textContent).not.toContain("合流");
+  });
+
+  test("下に何かあることは弧が言い、数はツールチップに逃がす", () => {
+    const mvp = Array.from($("center-body").querySelectorAll("g.graph-node")).find(
+      (g) => g.querySelector("title")?.textContent === "MVP実装完了",
+    )!;
+    // フォーカス自身（配下5件）には軌道が出る
+    expect(mvp.querySelector(".ring.track")).toBeTruthy();
+    expect(mvp.querySelector(".ring.track title")?.textContent).toMatch(/^下に \d+\/\d+$/);
+  });
+
+  test("合流の数だけは文字で残す（数が読めないと優先度として使えない）", async () => {
+    // サンプルでは `新リポジトリを作る` が4箇所から要求されている。
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    Array.from($("center-body").querySelectorAll("g.graph-node"))
+      .find((g) => g.querySelector("title")?.textContent === "MVP実装完了")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    Array.from($("center-body").querySelectorAll("g.graph-node"))
+      .find((g) => g.querySelector("title")?.textContent === "Markdownノードストア")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    const merged = Array.from($("center-body").querySelectorAll("g.graph-node .merge"));
+    expect(merged.length).toBeGreaterThan(0);
+    expect(merged[0]!.firstChild?.nodeValue).toMatch(/^\d+$/);
+    expect(merged[0]!.querySelector("title")?.textContent).toContain("箇所から要求されている");
+  });
+});
+
+describe("目的の俯瞰（配下の今やれること）", () => {
+  const crumb = (): string => text("breadcrumb");
+  const toggle = (label: string): HTMLButtonElement =>
+    Array.from($("breadcrumb").querySelectorAll("button")).find((b) => b.textContent === label) as HTMLButtonElement;
+
+  beforeEach(async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+  });
+
+  test("目的の入口はこれまでどおりグラフ（一覧に差し替えない）", () => {
+    expect($("center-body").querySelector("svg")).toBeTruthy();
+    expect(toggle("俯瞰")).toBeTruthy();
+  });
+
+  test("俯瞰でその目的の配下だけに絞られる", async () => {
+    // 事前: 全体の「今やれること」には別の目的の下のものも出ている
+    $("nav-actionable").click();
+    await tick();
+    expect(text("center-body")).toContain("領収書整理"); // 確定申告 の下
+
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    toggle("俯瞰").click();
+    await tick();
+    expect(crumb()).toContain("Sirube をリリースする の配下");
+    expect(text("center-body")).toContain("Rustツールチェーンを入れる");
+    expect(text("center-body")).not.toContain("領収書整理");
+  });
+
+  test("絞ったらパンくずの列は出さない（全行で同じ値になる）", async () => {
+    toggle("俯瞰").click();
+    await tick();
+    const crumbs = Array.from($("center-body").querySelectorAll(".hit-crumb"));
+    expect(crumbs.length).toBeGreaterThan(0);
+    expect(crumbs.every((c) => (c.textContent ?? "") === "")).toBe(true);
+  });
+
+  test("進捗はここに出さない（サイドバーとインスペクタが既に出している）", async () => {
+    toggle("俯瞰").click();
+    await tick();
+    // 一度、同じ `4/11` が サイドバー行・一覧の見出し・インスペクタのバー の
+    // 3箇所に同時に出る画面を作ってしまった（2026-09-02 の棚卸しで実測）。
+    expect($("center-body").querySelector(".list-count")).toBeNull();
+    expect(findButton("root-list", "Sirube をリリースする")!.textContent).toMatch(/\d+\/\d+/);
+    expect($("inspector").querySelector(".progress-label")?.textContent).toMatch(/^\d+\/\d+$/);
+  });
+
+  test("俯瞰から選ぶと、絞っていた目的が経路に残る", async () => {
+    toggle("俯瞰").click();
+    await tick();
+    const row = Array.from($("center-body").querySelectorAll(".hit-main")).find((b) =>
+      (b.textContent ?? "").includes("Rustツールチェーンを入れる"),
+    ) as HTMLButtonElement;
+    row.click();
+    await tick();
+    // 経路ごと捨てると、俯瞰で見つけた枝から目的へ戻れなくなる。
+    expect(crumb()).toContain("Sirube をリリースする");
+    expect(crumb()).toContain("Rustツールチェーンを入れる");
+  });
+
+  test("グラフへ戻れる／サイドバーの「今やれること」は俯瞰では点かない", async () => {
+    toggle("俯瞰").click();
+    await tick();
+    expect($("nav-actionable").classList.contains("active")).toBe(false);
+    expect(findButton("root-list", "Sirube をリリースする")!.classList.contains("active")).toBe(true);
+    toggle("グラフ").click();
+    await tick();
+    expect($("center-body").querySelector("svg")).toBeTruthy();
+    expect(crumb()).toContain("Sirube をリリースする");
+  });
+
+  test("潜った先で俯瞰しても、辿ってきた道は消えない", async () => {
+    Array.from($("center-body").querySelectorAll("g.graph-node"))
+      .find((g) => g.querySelector("title")?.textContent === "MVP実装完了")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    toggle("俯瞰").click();
+    await tick();
+    // 絞る対象が変わっても「今どこにいるか」は変わらない。道が消えると
+    // 手がかりが「◯◯ の配下」の1語だけになる。
+    expect(crumb()).toContain("Sirube をリリースする");
+    expect(crumb()).toContain("MVP実装完了 の配下");
+    // 道の途中を押せばそこのグラフへ戻る
+    findButton("breadcrumb", "Sirube をリリースする")!.click();
+    await tick();
+    expect($("center-body").querySelector("svg")).toBeTruthy();
+    expect(crumb()).not.toContain("の配下");
+  });
+
+  test("検索から入って俯瞰を押しても、検索結果のままにならない", async () => {
+    // 検索は常に全体にかける決まりなので、語が残ったままだと俯瞰を押しても
+    // 検索結果が出続け、押した意味が消える（2026-09-02 に実機で踏んだ）。
+    const input = $("search-input") as HTMLInputElement;
+    input.value = "MVP";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    const hit = $("center-body").querySelector(".hit-main") as HTMLButtonElement;
+    hit.click();
+    await tick();
+    toggle("俯瞰").click();
+    await tick();
+    expect(input.value).toBe("");
+    expect(crumb()).toContain("の配下");
+    expect($("center-body").querySelector(".list-count")).toBeNull();
+  });
+
+  test("検索は俯瞰中でも全体にかける", async () => {
+    toggle("俯瞰").click();
+    await tick();
+    const input = $("search-input") as HTMLInputElement;
+    input.value = "領収書";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    // 絞ったままだと、ヘッダーの検索欄という全体の道具が場所によって効き方を変える。
+    expect(text("center-body")).toContain("領収書整理");
+  });
+});
+
+describe("改名と削除", () => {
+  const insp = (sel: string): HTMLElement | null => $("inspector").querySelector(sel);
+
+  beforeEach(async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+  });
+
+  test("その場で名前を変えられる（参照は切れない）", async () => {
+    (insp(".insp-name-row .icon-btn") as HTMLButtonElement).click();
+    const input = insp(".insp-rename") as HTMLInputElement;
+    expect(input.value).toBe("確定申告");
+    input.value = "確定申告2027";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await tick();
+    expect(text("inspector")).toContain("確定申告2027");
+    // 参照は id のままなので、下がぶら下がったまま残る
+    expect(text("center-body")).toContain("領収書整理");
+    expect(findButton("root-list", "確定申告2027")).toBeTruthy();
+  });
+
+  test("Escape で取り消せる", async () => {
+    (insp(".insp-name-row .icon-btn") as HTMLButtonElement).click();
+    const input = insp(".insp-rename") as HTMLInputElement;
+    input.value = "書き換え途中";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await tick();
+    expect(insp(".insp-name")?.textContent).toBe("確定申告");
+  });
+
+  test("既にある名前には変えられない", async () => {
+    // 名前で参照を解決する経路があるので、同名が2つあるとどちらにも繋がらない。
+    (insp(".insp-name-row .icon-btn") as HTMLButtonElement).click();
+    const input = insp(".insp-rename") as HTMLInputElement;
+    input.value = "領収書整理";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await tick();
+    expect(text("toast-stack")).toContain("同じ名前になります");
+    expect(insp(".insp-name")?.textContent).toBe("確定申告");
+  });
+
+  test("削除は一度受け止める。やめれば消えない", async () => {
+    findButton("inspector", "このノードを削除")!.click();
+    expect(text("inspector")).toContain("取り消せません");
+    findButton("inspector", "やめる")!.click();
+    await tick();
+    expect(findButton("root-list", "確定申告")).toBeTruthy();
+    expect(text("inspector")).not.toContain("取り消せません");
+  });
+
+  test("削除で目的が生えるなら、押す前に件数と名前を出す", async () => {
+    // ルート判定が入次数0なので、中間ノードを消すとその子が目的として現れる。
+    // 構造としては正しいが、削除の副作用としては予想できない。
+    findButton("inspector", "このノードを削除")!.click();
+    expect(text("inspector")).toContain("1 件");
+    expect(text("inspector")).toContain("領収書整理");
+    expect(text("inspector")).toContain("目的として一覧に出るようになります");
+  });
+
+  test("削除すると参照側からも外れる", async () => {
+    findButton("inspector", "このノードを削除")!.click();
+    findButton("inspector", "削除する")!.click();
+    await tick();
+    expect(findButton("root-list", "確定申告")).toBeUndefined();
+    // 参照だけ残ると自動解決が空ノードを作り直してしまう
+    expect(findButton("root-list", "領収書整理")).toBeTruthy();
+  });
+});
+
+describe("まとめて追加（DSL）", () => {
+  const openImport = async (): Promise<HTMLTextAreaElement> => {
+    $("import-btn").click();
+    await tick();
+    return $("modal").querySelector("textarea") as HTMLTextAreaElement;
+  };
+  const type = (ta: HTMLTextAreaElement, v: string): void => {
+    ta.value = v;
+    ta.dispatchEvent(new Event("input"));
+  };
+  const previewText = (): string =>
+    Array.from($("modal").querySelectorAll(".hint"))
+      .map((e) => e.textContent ?? "")
+      .join(" ");
+
+  test("入れ子と合流をそのまま書き下せる", async () => {
+    // 「前提を一括追加」は requires のフラット1段だけ。contains の入れ子を
+    // 作る道はここしかない。
+    const ta = await openImport();
+    type(ta, "機能を整える -> [一覧を整える] -> [Chain Viewを整える], 一覧を整える -> [進捗の重複を潰す], Chain Viewを整える -> [進捗の重複を潰す]");
+    findButton("modal", "追加")!.click();
+    await tick();
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(true);
+
+    $("search-input").dispatchEvent(new Event("input"));
+    const input = $("search-input") as HTMLInputElement;
+    input.value = "進捗の重複";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    // 合流点として1ノードに解決される（2つ作られない）
+    expect($("center-body").querySelectorAll(".hit").length).toBe(1);
+    expect(text("center-body")).toContain("合流 2");
+  });
+
+  test("既存の名前を書けば繋がるだけで、新しくは作られない", async () => {
+    const ta = await openImport();
+    type(ta, "確定申告 -> [医療費の領収書を集める]");
+    expect(previewText()).toContain("1 件を新しく作り、1 件は既存に繋ぎます");
+    findButton("modal", "追加")!.click();
+    await tick();
+    const input = $("search-input") as HTMLInputElement;
+    input.value = "確定申告";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    expect($("center-body").querySelectorAll(".hit").length).toBe(1);
+  });
+
+  test("構文エラーは押す前に出す", async () => {
+    const ta = await openImport();
+    type(ta, "引っ越し ->");
+    expect($("modal").querySelector(".hint.error")).toBeTruthy();
+    // 押してからトーストで返すと、どこが悪いのか分からないまま同じ文字列を
+    // 2回書くことになる。
+    expect(previewText()).not.toContain("件を新しく作");
+  });
+
+  test("Ctrl+Enter で確定できる", async () => {
+    const ta = await openImport();
+    type(ta, "新しい目的A -> 新しい前提B");
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
+    await tick();
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(true);
+    expect(text("breadcrumb")).toContain("新しい目的A");
   });
 });
 
@@ -356,5 +1021,260 @@ describe("vault の表示と切り替え", () => {
     findButton("modal", "別のフォルダを開く")!.click();
     await tick();
     expect(switched).toBe(1);
+  });
+});
+
+describe("凡例", () => {
+  const legendBtn = (): HTMLButtonElement => $("center-body").querySelector(".legend-btn") as HTMLButtonElement;
+  const panel = (): HTMLElement => $("center-body").querySelector(".legend-panel") as HTMLElement;
+
+  beforeEach(async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+  });
+
+  test("既定では畳んである（追い出した文字を別の場所に戻さない）", () => {
+    expect(legendBtn()).toBeTruthy();
+    expect(panel().classList.contains("hidden")).toBe(true);
+  });
+
+  test("ホバーで開き、離れると閉じる", () => {
+    legendBtn().dispatchEvent(new MouseEvent("mouseenter"));
+    expect(panel().classList.contains("hidden")).toBe(false);
+    legendBtn().dispatchEvent(new MouseEvent("mouseleave"));
+    expect(panel().classList.contains("hidden")).toBe(true);
+  });
+
+  test("クリックで固定でき、もう一度で外れる", () => {
+    legendBtn().click();
+    legendBtn().dispatchEvent(new MouseEvent("mouseleave"));
+    // ホバーだけだと読んでいる途中に手がずれて閉じる
+    expect(panel().classList.contains("hidden")).toBe(false);
+    legendBtn().click();
+    expect(panel().classList.contains("hidden")).toBe(true);
+  });
+
+  test("4状態・線種2つ・弧・合流を説明する", () => {
+    legendBtn().click();
+    const body = panel().textContent ?? "";
+    for (const label of ["今やれる", "前提待ち", "達成済み", "輪で詰まっている"]) {
+      expect(body).toContain(label);
+    }
+    expect(body).toContain("これが必要（前提）");
+    expect(body).toContain("これで構成（内包）");
+    expect(body).toContain("下にあるものの進み具合");
+    expect(body).toContain("何箇所から要求されているか");
+  });
+
+  test("見本はグラフと同じ印で描く（別の語彙にしない）", () => {
+    // 凡例が本物と違う描き方だと、照らし合わせる側がもう一段の翻訳をする。
+    legendBtn().click();
+    const marks = panel().querySelectorAll(".legend-mark.graph-node .mark");
+    expect(marks.length).toBe(4);
+    expect(panel().querySelector(".legend-mark .graph-edge.contains")).toBeTruthy();
+    expect(panel().querySelector(".legend-mark .ring.arc")).toBeTruthy();
+  });
+});
+
+describe("前回開いていた場所を覚える", () => {
+  /** localStorage は消さずに開き直す＝アプリを閉じて次の日に開いたのと同じ。 */
+  const reopen = async (): Promise<void> => {
+    document.body.innerHTML = HTML;
+    await startApp(sampleFs());
+  };
+
+  test("潜った先で開き直すと、そこから始まる", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+
+    await reopen();
+    expect($("center-body").querySelector("svg")).toBeTruthy();
+    expect(text("breadcrumb")).toContain("Sirube をリリースする");
+    // グラフに立つときは必ず何かを選んでいる。ここが崩れると詳細パネルだけ
+    // 空のグラフ画面になる。
+    expect(document.body.classList.contains("no-inspector")).toBe(false);
+  });
+
+  test("俯瞰していたら俯瞰から始まる", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    buttonsIn("breadcrumb").find((b) => b.textContent === "俯瞰")!.click();
+    await tick();
+
+    await reopen();
+    expect(text("breadcrumb")).toContain("Sirube をリリースする の配下");
+  });
+
+  test("検索語は覚えない", async () => {
+    // ここまで覚えると、開いた瞬間に出るのは前回の続きではなく前回の道具立てになる。
+    const input = $("search-input") as HTMLInputElement;
+    input.value = "README";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    expect(text("breadcrumb")).toContain("検索結果");
+
+    await reopen();
+    expect(text("breadcrumb")).toContain("今やれること");
+    expect(($("search-input") as HTMLInputElement).value).toBe("");
+  });
+
+  test("覚えていたノードが消えていたら TOP から始まる", async () => {
+    // 外のエディタや git のマージでファイルが減るのは日常の経路。存在しない
+    // id を指したまま描くと、名前の出ないグラフができる。
+    localStorage.setItem("sirube.place", JSON.stringify({ mode: "graph", focusId: "01NOTHERE", trail: ["01GONE"] }));
+    await reopen();
+    expect(text("breadcrumb")).toContain("今やれること");
+    // 「svg が無い」では見ない——一覧の行にもアイコンの svg が入っている。
+    expect($("center-body").classList.contains("graph")).toBe(false);
+  });
+
+  test("壊れた値が入っていても起動する", async () => {
+    localStorage.setItem("sirube.place", "{ここで切れている");
+    await reopen();
+    expect(text("breadcrumb")).toContain("今やれること");
+    expect(text("center-body")).toContain("READMEとマニュアルを書く");
+  });
+});
+
+describe("付箋（目的に貼る色）", () => {
+  const swatches = (): HTMLButtonElement[] =>
+    Array.from($("inspector").querySelectorAll(".swatch")) as HTMLButtonElement[];
+  const pick = (color: string): HTMLButtonElement =>
+    swatches().find((b) => b.classList.contains(`swatch-${color}`))!;
+  const rowCard = (label: string): HTMLElement =>
+    Array.from($("center-body").querySelectorAll(".hit")).find((c) =>
+      (c.textContent ?? "").includes(label),
+    ) as HTMLElement;
+
+  test("目的にだけ貼れる。末端には欄そのものが出ない", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    expect(swatches().length).toBe(7); // 「貼らない」＋ 6色
+
+    // 末端まで貼れるようにすると、それは model.ts の原則4 が禁じているタグ
+    // そのものになる。目的（入次数0）だけを例外にしてある。
+    $("nav-actionable").click();
+    await tick();
+    (Array.from($("center-body").querySelectorAll(".hit-main")).find((b) =>
+      (b.textContent ?? "").includes("領収書整理"),
+    ) as HTMLButtonElement).click();
+    await tick();
+    expect(swatches().length).toBe(0);
+  });
+
+  test("貼るとサイドバーと一覧に出る。同じ色をもう一度押すと外れる", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    pick("pink").click();
+    await tick();
+    expect(findButton("root-list", "確定申告")!.querySelector(".goal-tag-pink")).toBeTruthy();
+
+    // 一覧の行は「どの目的の下か」で色が付く。領収書整理は確定申告の下。
+    $("nav-actionable").click();
+    await tick();
+    expect(rowCard("領収書整理").querySelector(".hit-tag")).toBeTruthy();
+    expect(rowCard("READMEとマニュアルを書く").querySelector(".hit-tag")).toBeNull();
+
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    pick("pink").click();
+    await tick();
+    expect(findButton("root-list", "確定申告")!.querySelector(".goal-tag")).toBeNull();
+  });
+
+  test("貼った色はファイルに残る（開き直しても消えない）", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    pick("blue").click();
+    await tick();
+    expect($("inspector").querySelector(".swatch-blue")!.classList.contains("on")).toBe(true);
+  });
+
+  test("俯瞰では帯を出さない（全行が同じ目的の下）", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    pick("green").click();
+    await tick();
+    (Array.from($("breadcrumb").querySelectorAll("button")).find(
+      (b) => b.textContent === "俯瞰",
+    ) as HTMLButtonElement).click();
+    await tick();
+    // 絞った時点で全行が同じ色になる。パンくずを消しているのと同じ理由。
+    expect($("center-body").querySelector(".hit-tag")).toBeNull();
+  });
+});
+
+describe("グラフのノードを押したとき", () => {
+  const graphNode = (label: string): SVGGElement =>
+    Array.from($("center-body").querySelectorAll("g.graph-node")).find((g) =>
+      (g.textContent ?? "").includes(label),
+    ) as unknown as SVGGElement;
+  const clickNode = async (label: string): Promise<void> => {
+    graphNode(label).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+  };
+
+  test("下に何も無いノードは潜らない。選ぶだけ", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+
+    // 確定申告 -> 領収書整理（末端）。潜っても丸1つの画面になるだけで、
+    // 戻るのに1クリック要る（のっち報告 2026-09-03）。
+    await clickNode("領収書整理");
+    expect(text("breadcrumb")).not.toContain("領収書整理");
+    // 潜って得られるものは、選んだときに右パネルへ出るものと同じ。
+    expect(text("inspector")).toContain("領収書整理");
+    // 押した手応えとして、グラフ側にも今どれを出しているかの印が要る。
+    expect(graphNode("領収書整理").classList.contains("selected")).toBe(true);
+  });
+
+  test("参照だけあって実体の無い子は「下にある」と数えない", async () => {
+    // 数えると、潜った先が空のまま「潜れるノード」に見える。sample にこの形が
+    // 無いので、この検査のためだけに最小の vault を組む。id は Crockford Base32
+    // （I / L / O / U を含まない26文字）でないと isUlid() に弾かれる。
+    const id = (tail: string): string => `01M0TEST${tail}${"0".repeat(16)}`;
+    const md = (name: string, requires: string[]): string =>
+      [
+        "---",
+        `name: ${name}`,
+        "satisfied: false",
+        requires.length === 0 ? "requires: []" : "requires:",
+        ...requires.map((r) => `  - ${r}`),
+        "contains: []",
+        "---",
+        "",
+      ].join("\n");
+
+    document.body.innerHTML = HTML;
+    localStorage.clear();
+    await startApp(
+      new MemoryFs({
+        [id("A0")]: md("親", [id("B0"), id("C0")]),
+        [id("B0")]: md("幽霊持ち", [id("ZZ")]), // ZZ のファイルは作らない
+        [id("C0")]: md("実子持ち", [id("D0")]),
+        [id("D0")]: md("孫", []),
+      }),
+    );
+    findButton("root-list", "親")!.click();
+    await tick();
+
+    // 陽性対照。実体のある子を持つ方は、これまでどおり潜れる。
+    // これが無いと、クリックが丸ごと壊れていても下の否定検査は通る。
+    await clickNode("実子持ち");
+    expect(text("breadcrumb")).toContain("実子持ち");
+
+    findButton("root-list", "親")!.click();
+    await tick();
+    await clickNode("幽霊持ち");
+    expect(text("breadcrumb")).not.toContain("幽霊持ち");
+    expect(text("inspector")).toContain("幽霊持ち");
+  });
+
+  test("下に何かあるノードはこれまでどおり潜る", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    await clickNode("MVP実装完了");
+    expect(text("breadcrumb")).toContain("MVP実装完了");
+    expect($("center-body").querySelector("svg")).toBeTruthy();
   });
 });

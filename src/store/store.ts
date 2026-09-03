@@ -42,7 +42,65 @@ export class MarkdownGraphStore {
       if (problems.length > 0) issues.push({ id: entry.id, problems });
     }
     resolveReferences(graph, issues);
+    await this.assignNumbers(graph, issues);
     return { graph, issues };
+  }
+
+  /**
+   * 番号（`#12`）を揃える。無いノードには振り、重複していたら片方を振り直す。
+   *
+   * 番号は ULID と違って**ファイル名ではない**ので、2台の vault で同時に
+   * ノードを作ると同じ番号が別のノードに付き、git から見れば別ファイルの中身が
+   * 違うだけ＝素通りする。ULID を選んだ理由が「静かに壊れない」ことだったので、
+   * 番号だけ静かに壊れる状態は残さない。
+   *
+   * **振り直すのは後から作られた方**（ULID が大きい方）。先に振られた番号は
+   * 動かさない——番号の価値は「安定して同じものを指す」ことに尽き、既に口に
+   * 出された番号が別物を指し始めるのが一番まずい。
+   *
+   * 既存 vault は初回の読み込みでその場で移行される（ULID 昇順に 1 から）。
+   */
+  private async assignNumbers(graph: Graph, issues: { id: string; problems: string[] }[]): Promise<void> {
+    // ULID は時刻順に並ぶので、ソートがそのまま作成順になる。
+    const ids = Object.keys(graph.nodes).sort();
+    const taken = new Map<number, string>();
+    const renumber: string[] = [];
+
+    for (const id of ids) {
+      const node = graph.nodes[id]!;
+      if (node.number === undefined) continue;
+      const owner = taken.get(node.number);
+      if (owner === undefined) {
+        taken.set(node.number, id);
+        continue;
+      }
+      // 先勝ち。後から来た方を捨てて振り直す。
+      issues.push({ id, problems: [`番号 #${node.number} が「${graph.nodes[owner]!.name}」と重複していたので振り直しました`] });
+      node.number = undefined;
+      renumber.push(id);
+    }
+
+    let next = taken.size === 0 ? 1 : Math.max(...taken.keys()) + 1;
+    const assigned: string[] = [];
+    for (const id of ids) {
+      const node = graph.nodes[id]!;
+      if (node.number !== undefined) continue;
+      node.number = next;
+      taken.set(next, id);
+      next += 1;
+      assigned.push(id);
+    }
+    if (assigned.length > 0) await this.persist(graph, assigned);
+    void renumber; // 振り直しは assigned に含まれるので、ここでは記録だけ
+  }
+
+  /** 次に振る番号。既存の最大 + 1。 */
+  private nextNumber(graph: Graph): number {
+    let max = 0;
+    for (const node of Object.values(graph.nodes)) {
+      if (node.number !== undefined && node.number > max) max = node.number;
+    }
+    return max + 1;
   }
 
   /** 指定 id のノードだけ書き戻し、mtime をメモリ側にも反映する。 */
@@ -61,6 +119,27 @@ export class MarkdownGraphStore {
     return this.mint(graph, name);
   }
 
+  /** 表示名を変える。ファイル名（id）は動かさない。
+   *
+   * id をファイル名に閉じ込めてあるので、改名は `name` の1行を書き換えるだけで
+   * 済み、参照は id のままなので1本も切れない。**同名は作らせない**——名前で
+   * 参照を解決する経路（DSL・まとめて追加）があり、同じ名前が2つあると
+   * どちらにも繋がずに警告で止まる。改名でその状態を作れてしまうと、
+   * 後からその2つを手で見分ける必要が出る。 */
+  async renameNode(graph: Graph, id: string, name: string): Promise<void> {
+    const node = graph.nodes[id];
+    if (!node) throw new Error(`node "${id}" not found`);
+    const trimmed = name.trim();
+    if (trimmed === "" || trimmed === node.name) return;
+    const key = normalizeForDuplicateCheck(trimmed);
+    const clash = Object.values(graph.nodes).find(
+      (n) => n.id !== id && normalizeForDuplicateCheck(n.name) === key,
+    );
+    if (clash) throw new Error(`「${clash.name}」と同じ名前になります`);
+    node.name = trimmed;
+    await this.persist(graph, [id]);
+  }
+
   /** 未使用の id を採って、ノードのファイルを排他作成する。
    *
    * ULID の衝突確率そのものは無視してよい（同一ミリ秒内でしか衝突しえず、
@@ -75,7 +154,8 @@ export class MarkdownGraphStore {
     for (let attempt = 0; attempt < MINT_ATTEMPTS; attempt += 1) {
       const id = ulid();
       if (graph.nodes[id]) continue; // メモリ上の重複。まず起きないが確認は安い
-      const node = { ...newNode(id), name };
+      // 番号はここで振る。作った瞬間から  で指せる。
+      const node = { ...newNode(id), name, number: this.nextNumber(graph) };
       try {
         await this.fs.createNode(id, serializeNodeFile(node));
       } catch (err) {

@@ -5,6 +5,8 @@ import {
   blockedByCycle,
   buildReverseIndex,
   cyclicNodes,
+  descendantOutline,
+  descendantProgress,
   findCycles,
   inDegree,
   neighbors,
@@ -14,7 +16,7 @@ import {
   toggleSatisfied,
 } from "./engine.ts";
 import { newGraph, type Graph } from "./model.ts";
-import { countActionable, nextActions, search, stuckReport } from "./search.ts";
+import { countActionable, nextActions, pathFromRoot, search, stuckReport } from "./search.ts";
 
 /** DSL からテスト用グラフを組む。mtime は 0。 */
 function g(dsl: string): Graph {
@@ -174,6 +176,33 @@ describe("カスケード", () => {
     toggleSatisfied(graph, "検索", rev);
     expect(graph.nodes["MVP"]!.satisfied).toBe(true); // 一方向（2026-08-26 の判断）
   });
+
+  test("親に未達の前提があれば、子が揃っても親は立てない", () => {
+    // `requires` と `contains` の両方を持つノードで、contains 側だけ揃った状態。
+    // 実データでこれが起きて、目的が勝手に達成済みになった（2026-09-02）。
+    const graph = g("目的 -> 手順書, 目的 -> [部品A] -> [部品B]");
+    const rev = buildReverseIndex(graph);
+    toggleSatisfied(graph, "部品A", rev);
+    toggleSatisfied(graph, "部品B", rev);
+    expect(graph.nodes["部品A"]!.satisfied).toBe(true);
+    expect(graph.nodes["部品B"]!.satisfied).toBe(true);
+    // 手順書がまだなので、目的は達成にならない
+    expect(graph.nodes["目的"]!.satisfied).toBe(false);
+    expect(graph.nodes["手順書"]!.satisfied).toBe(false);
+
+    // 前提も満たせば、そこで初めて集約が効く
+    toggleSatisfied(graph, "手順書", buildReverseIndex(graph));
+    expect(graph.nodes["目的"]!.satisfied).toBe(true);
+  });
+
+  test("カスケードの判定は resolveState と食い違わない", () => {
+    // 片方だけが両エッジを見ていると、導出とカスケードが別のことを言い始める。
+    const graph = g("目的 -> 手順書, 目的 -> [部品A]");
+    const rev = buildReverseIndex(graph);
+    toggleSatisfied(graph, "部品A", rev);
+    expect(resolveState(graph, "目的")).toBe("BLOCKED");
+    expect(graph.nodes["目的"]!.satisfied).toBe(false);
+  });
 });
 
 describe("構造", () => {
@@ -310,5 +339,134 @@ describe("循環解析の使い回し", () => {
     const rev = buildReverseIndex(graph);
     expect(countActionable(graph)).toBe(nextActions(graph, rev).total);
     expect(countActionable(graph, analyzeCycles(graph))).toBe(1);
+  });
+});
+
+describe("descendantProgress / descendantOutline", () => {
+  // プロジェクト
+  //  ├─(contains) Aの担当分 ── 実装 / ドキュメント
+  //  └─(contains) Bの担当分 ── テスト
+  const dsl = "プロジェクト -> [Aの担当分] -> [Bの担当分], Aの担当分 -> [実装] -> [ドキュメント], Bの担当分 -> [テスト]";
+
+  test("下の達成率は両エッジを辿り、自分は数に入れない", () => {
+    // 分解のほとんどは requires なので、contains だけ見るとほぼ全ノードで
+    // 「下に何も無い」ことになる（移植元の取り残し。2026-09-02 に直した）。
+    const graph = g(`${dsl}, テスト -> テスト環境`);
+    expect(descendantProgress(graph, "プロジェクト")).toEqual({ done: 0, total: 6 });
+    graph.nodes["実装"]!.satisfied = true;
+    expect(descendantProgress(graph, "プロジェクト")).toEqual({ done: 1, total: 6 });
+  });
+
+  test("自分の satisfied は下の達成率に数えない", () => {
+    // 「本体は達成だが下は未完」を見せるための指標なので、ここで自分を
+    // 入れると誤読を防ぐ役に立たなくなる。
+    const graph = g(dsl);
+    graph.nodes["プロジェクト"]!.satisfied = true;
+    expect(descendantProgress(graph, "プロジェクト")).toEqual({ done: 0, total: 5 });
+  });
+
+  test("合流点は二重に数えない", () => {
+    const graph = g(`${dsl}, Aの担当分 -> [共通基盤], Bの担当分 -> [共通基盤]`);
+    expect(descendantProgress(graph, "プロジェクト")).toEqual({ done: 0, total: 6 });
+  });
+
+  test("一覧に並ぶのは飛び先だけ。末端は出さない", () => {
+    // チェックリストではなく飛び先のメニュー。末端まで並べると実データで
+    // 12行 → 30行 に膨らみ、ホバーで出すには重すぎた（2026-09-02 に戻した）。
+    const graph = g(dsl);
+    expect(descendantOutline(graph, "プロジェクト").map((x) => [x.id, x.depth])).toEqual([
+      ["Aの担当分", 0],
+      ["Bの担当分", 0],
+    ]);
+  });
+
+  test("requires の下も一覧に出る（contains 限定にしない）", () => {
+    const graph = g("引っ越し -> 引っ越し先の家 -> 不動産に行く");
+    expect(descendantOutline(graph, "引っ越し").map((x) => [x.id, x.depth])).toEqual([
+      ["引っ越し先の家", 0],
+    ]);
+  });
+
+  test("行の done は自分の satisfied ではなく下が揃ったか", () => {
+    const graph = g(dsl);
+    graph.nodes["Aの担当分"]!.satisfied = true;
+    const before = descendantOutline(graph, "プロジェクト").find((x) => x.id === "Aの担当分")!;
+    expect(before.done).toBe(false); // 本体は達成でも下は未完
+    graph.nodes["実装"]!.satisfied = true;
+    graph.nodes["ドキュメント"]!.satisfied = true;
+    const after = descendantOutline(graph, "プロジェクト").find((x) => x.id === "Aの担当分")!;
+    expect(after.done).toBe(true);
+  });
+
+  test("合流点は2度目以降 repeat が立ち、展開を繰り返さない", () => {
+    // 部品にも下を持たせる（末端は一覧に出ないので、繰り返しの検査にならない）
+    const graph = g("親 -> [A] -> [B], A -> [共通] -> [C], B -> [共通], 共通 -> [部品], 部品 -> [ねじ]");
+    const outline = descendantOutline(graph, "親");
+    const shared = outline.filter((x) => x.id === "共通");
+    expect(shared.map((x) => x.repeat)).toEqual([false, true]);
+    // 部品（共通の下）は最初の1回だけ。2度目の下にはぶら下がらない。
+    expect(outline.filter((x) => x.id === "部品").length).toBe(1);
+  });
+
+  test("輪になっていても止まる", () => {
+    const graph = g("A -> [B]");
+    graph.nodes["B"]!.contains.push("A");
+    // どちらも下を持つので両方とも行になる（A は既出）
+    expect(descendantOutline(graph, "A").map((x) => x.id)).toEqual(["B", "A"]);
+    expect(descendantProgress(graph, "A")).toEqual({ done: 0, total: 1 });
+  });
+
+  test("下が末端しか無ければ一覧は空（＝ホバーしても出ない）", () => {
+    const graph = g("確定申告 -> 領収書整理");
+    expect(descendantOutline(graph, "確定申告")).toEqual([]);
+    expect(descendantOutline(graph, "領収書整理")).toEqual([]);
+    expect(descendantProgress(graph, "領収書整理")).toEqual({ done: 0, total: 0 });
+  });
+});
+
+describe("pathFromRoot（目的からの経路）", () => {
+  const path = (graph: Graph, id: string): string[] => pathFromRoot(graph, buildReverseIndex(graph), id);
+
+  test("目的から対象の1つ上までを順に返す。対象自身は含まない", () => {
+    const graph = g("引っ越し -> 家 -> 不動産 -> 内見の予約を取る");
+    expect(path(graph, "内見の予約を取る")).toEqual(["引っ越し", "家", "不動産"]);
+  });
+
+  test("目的そのものは空", () => {
+    expect(path(g("引っ越し -> 家"), "引っ越し")).toEqual([]);
+  });
+
+  test("内包でも同じように辿る（前提と区別しない）", () => {
+    // パンくずが言うのは「どこにいるか」で、そこへ来た関係の種類ではない。
+    const graph = g("目的 -> [部品A], 部品A -> 部品Aの中身");
+    expect(path(graph, "部品Aの中身")).toEqual(["目的", "部品A"]);
+  });
+
+  test("合流点では最短の1本。同じ長さなら親の名前順で決まる", () => {
+    // 経路は本来一意でない。飛ぶたびに違う道が出ると、同じノードが毎回
+    // 違う場所にあるように見えるので、選び方を決定的にしてある。
+    const graph = g("目的 -> 長い道 -> 中継 -> 合流, 目的 -> 短い道 -> 合流");
+    expect(path(graph, "合流")).toEqual(["目的", "短い道"]);
+
+    // 同じ長さの2本。名前順で「あ」側が勝つ。
+    const tie = g("目的 -> あの道 -> 合流, 目的 -> んの道 -> 合流");
+    expect(path(tie, "合流")).toEqual(["目的", "あの道"]);
+    expect(path(tie, "合流")).toEqual(path(tie, "合流")); // 呼ぶたびに変わらない
+  });
+
+  test("輪の中にいて目的へ届かないときは空", () => {
+    // 空を返すのは「経路が無い」で、パンくずは1段だけになる。ここで例外を
+    // 投げたり無限に上ったりすると、輪のあるノードを開けなくなる。
+    const graph = g("実績を作る -> 案件を取る -> 実績を作る");
+    expect(path(graph, "実績を作る")).toEqual([]);
+  });
+
+  test("輪の下にぶら下がっていても、目的まで届くなら経路が出る", () => {
+    const graph = g("ポートフォリオを公開する -> 実績を作る -> 案件を取る -> 実績を作る");
+    expect(path(graph, "案件を取る")).toEqual(["ポートフォリオを公開する", "実績を作る"]);
+  });
+
+  test("知らない id は空", () => {
+    expect(path(g("引っ越し -> 家"), "存在しない")).toEqual([]);
   });
 });

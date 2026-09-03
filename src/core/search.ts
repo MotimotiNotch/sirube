@@ -13,6 +13,7 @@
 import {
   analyzeCycles,
   blockedByCycle,
+  collectMembers,
   inDegree,
   neighbors,
   resolveState,
@@ -29,6 +30,12 @@ export interface SearchOptions {
   states?: readonly NodeState[];
   /** 隣接を何ホップまで出すか。既定は 1（0 で隣接なし）。 */
   neighborDepth?: 0 | 1;
+  /** このノードの配下だけに絞る（自分は含まない）。目的の「俯瞰」に使う。
+   *
+   * 一覧は道具としては**俯瞰モード**であって、潜っていく画面ではない
+   * （2026-09-02 のっち）。だからこれは入口を差し替えるものではなく、
+   * 同じ1画面に絞り込みが1つ増えるだけ。 */
+  under?: string;
   limit?: number;
   /** 呼び出し側が既に持っている循環の解析結果。省略すると内部で計算する。
    *
@@ -46,7 +53,9 @@ export interface SearchHit {
   inDegree: number;
   due?: string;
   /** 一致が本文側だったかどうか（UI が抜粋を出す判断に使う）。 */
-  matchedIn: ("name" | "note")[];
+  matchedIn: ("name" | "note" | "number")[];
+  /** vault 内で通しの番号（`#12`）。行に出して口頭で指せるようにする。 */
+  number?: number;
   /** 近接情報。ここが「検索が完全一致ゲームでなくなる」の実体。 */
   neighbors?: Neighbors;
 }
@@ -74,18 +83,73 @@ export function ancestorRoots(g: Graph, id: string, rev: ReverseIndex, seen = ne
   return [...out];
 }
 
+/**
+ * 目的（入次数0）から `id` までの経路を1本返す。**`id` 自身は含まない。**
+ *
+ * 一覧から Chain View へ飛ぶと、それが目的の中のどこなのか画面のどこにも
+ * 出ていなかった（のっち報告 2026-09-03）。パンくずに積むために使う。
+ *
+ * 合流点は複数の親を持つので、**経路は本来一意ではない**。ここが返すのは
+ * 上へ向かう幅優先で最初に届いた1本——つまり最短で、同じ長さなら親の名前順。
+ * 一覧から飛ぶたびに違う道が出ると、同じノードが毎回違う場所にあるように
+ * 見えるので、選び方は決定的にしてある。
+ *
+ * `id` 自身が目的なら空を返す。輪の中にいて目的へ辿り着けないときも空。
+ */
+export function pathFromRoot(g: Graph, rev: ReverseIndex, id: string): string[] {
+  if (!g.nodes[id]) return [];
+  const parentsOf = (nid: string): string[] =>
+    [...(rev.requiredBy.get(nid) ?? []), ...(rev.containedBy.get(nid) ?? [])]
+      .filter((pid) => g.nodes[pid] !== undefined)
+      .sort((a, b) => g.nodes[a]!.name.localeCompare(g.nodes[b]!.name, "ja"));
+
+  if (parentsOf(id).length === 0) return [];
+
+  /** 見つけた親 → そこから `id` へ向かう1つ下。目的に届いたらここを下って組む。 */
+  const down = new Map<string, string>();
+  const seen = new Set<string>([id]);
+  let frontier = [id];
+
+  while (frontier.length > 0) {
+    const layer: string[] = [];
+    for (const cur of frontier) {
+      for (const parent of parentsOf(cur)) {
+        if (seen.has(parent)) continue; // 輪はここで止まる
+        seen.add(parent);
+        down.set(parent, cur);
+        if (parentsOf(parent).length === 0) {
+          const path: string[] = [];
+          for (let w: string | undefined = parent; w !== undefined && w !== id; w = down.get(w)) path.push(w);
+          return path;
+        }
+        layer.push(parent);
+      }
+    }
+    frontier = layer;
+  }
+  return [];
+}
+
 export function search(g: Graph, rev: ReverseIndex, opts: SearchOptions = {}): SearchResult {
-  const { query = "", states, neighborDepth = 1, limit } = opts;
+  const { query = "", states, neighborDepth = 1, limit, under } = opts;
   const needle = query.normalize("NFKC").trim().toLowerCase();
   const { cycles, cyclic } = opts.cycles ?? analyzeCycles(g);
 
+  // 配下の集合は1回だけ作る。ヒットごとに祖先を辿ると、木の深さぶん同じ道を
+  // 何度も上ることになる。
+  const scope = under === undefined ? undefined : new Set(collectMembers(g, under));
+
   const hits: SearchHit[] = [];
   for (const [id, node] of Object.entries(g.nodes)) {
+    if (scope && (id === under || !scope.has(id))) continue;
     const state = resolveState(g, id, cyclic);
     if (states && !states.includes(state)) continue;
 
-    const matchedIn: ("name" | "note")[] = [];
+    const matchedIn: ("name" | "note" | "number")[] = [];
     if (needle !== "") {
+      // 番号は完全一致だけ。`1` で `#1 / #10 / #12` が全部出ると、番号で引く
+      // 意味（1つに絞る）が無くなる。`#` は付けても付けなくてもよい。
+      if (node.number !== undefined && needle.replace(/^#/, "") === String(node.number)) matchedIn.push("number");
       if (node.name.normalize("NFKC").toLowerCase().includes(needle)) matchedIn.push("name");
       if (node.note.normalize("NFKC").toLowerCase().includes(needle)) matchedIn.push("note");
       if (matchedIn.length === 0) continue;
@@ -97,6 +161,7 @@ export function search(g: Graph, rev: ReverseIndex, opts: SearchOptions = {}): S
       breadcrumb: ancestorRoots(g, id, rev).filter((r) => r !== id).sort(),
       inDegree: inDegree(id, rev),
       matchedIn,
+      ...(node.number !== undefined ? { number: node.number } : {}),
       ...(node.due !== undefined ? { due: node.due } : {}),
     };
     if (neighborDepth === 1) hit.neighbors = neighbors(g, id, rev);
@@ -105,10 +170,12 @@ export function search(g: Graph, rev: ReverseIndex, opts: SearchOptions = {}): S
 
   // 名前一致を本文一致より上に。次に入次数の大きい順（片付けると多く進む）、
   // 最後は id で安定ソート。
+  // 番号一致を最優先に。番号で引くのは「その1つを出せ」という指示なので、
+  // 名前に同じ数字を含む行より先に来ないと用を成さない。
   hits.sort((a, b) => {
-    const an = a.matchedIn.includes("name") ? 0 : 1;
-    const bn = b.matchedIn.includes("name") ? 0 : 1;
-    return an - bn || b.inDegree - a.inDegree || a.id.localeCompare(b.id);
+    const rank = (h: SearchHit): number =>
+      h.matchedIn.includes("number") ? 0 : h.matchedIn.includes("name") ? 1 : 2;
+    return rank(a) - rank(b) || b.inDegree - a.inDegree || a.id.localeCompare(b.id);
   });
 
   const total = hits.length;
@@ -123,7 +190,7 @@ export function search(g: Graph, rev: ReverseIndex, opts: SearchOptions = {}): S
 export function nextActions(
   g: Graph,
   rev: ReverseIndex,
-  opts: { limit?: number; cycles?: CycleInfo } = {},
+  opts: { limit?: number; cycles?: CycleInfo; under?: string } = {},
 ): SearchResult {
   return search(g, rev, { states: ["ACTIONABLE"], neighborDepth: 1, ...opts });
 }

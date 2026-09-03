@@ -10,7 +10,7 @@ const NAMES = [
   "compass", "search", "circle-check", "circle", "circle-slash", "repeat",
   "plus", "trash-2", "chevron-right", "x", "corner-down-right", "layers",
   "triangle-alert", "wand-sparkles", "list-checks", "pencil", "arrow-left",
-  "folder-open",
+  "folder-open", "info", "sticky-note",
 ];
 
 const SOURCE = "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons";

@@ -6,11 +6,21 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { BaseDirectory, writeTextFile } from "@tauri-apps/plugin-fs";
 import { startApp } from "../ui/app.ts";
 import { toast } from "../ui/dom.ts";
 import { TauriFs } from "../store/tauri-fs.ts";
 
 const VAULT_KEY = "sirube.vaultPath";
+/** 今どの vault を開いているかを、**アプリの外から読める場所**に置くファイル。
+ *
+ * 書き込みの入口は「人間はアプリから、AI はファイルを直接」と決めた（2026-09-02）
+ * が、**AI 側は vault の場所を知る手段が無かった**。`VAULT_KEY` は WebView の
+ * localStorage にあり、実体は WebView2 の LevelDB なので外からは読めない。
+ *
+ * 中身はパス1行だけ。アプリはこれを**読まない**（読むと第二の真実になる。正は
+ * localStorage）——外向きの掲示板として書くだけ。 */
+const VAULT_POINTER = "vault-path.txt";
 
 /** 使う vault フォルダを決める。初回はフォルダ選択ダイアログを出す。
  *
@@ -21,6 +31,19 @@ async function pickVault(title: string): Promise<string | undefined> {
   if (typeof picked !== "string") return undefined;
   localStorage.setItem(VAULT_KEY, picked);
   return picked;
+}
+
+/** 外向きの掲示板を書く。**失敗しても起動は止めない**——これが無くて困るのは
+ *  AI が場所を探すときだけで、人間の操作には一切関係しないため。 */
+async function publishVaultPointer(path: string): Promise<void> {
+  try {
+    // フォルダ自体は WebView が先に作っている（このコードは WebView の中で
+    // 動いているので、プロファイルの置き場は必ず存在する）。mkdir は要らない。
+    await writeTextFile(VAULT_POINTER, `${path}
+`, { baseDir: BaseDirectory.AppLocalData });
+  } catch {
+    // 握りつぶす。ここで転ぶと「vault は開けるのにアプリが起動しない」になる。
+  }
 }
 
 async function resolveVault(): Promise<string | undefined> {
@@ -48,6 +71,7 @@ function showFatal(message: string): void {
 }
 
 const vault = await resolveVault();
+if (vault) void publishVaultPointer(vault);
 if (!vault) {
   showFatal("フォルダが選ばれなかったため起動できませんでした。ウィンドウを閉じてもう一度開いてください。");
 } else {

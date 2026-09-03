@@ -23,6 +23,7 @@ import {
   type CycleInfo,
   type ReverseIndex,
 } from "./engine.ts";
+import { AGENTS_DOC } from "./agents-doc.ts";
 import type { Graph, NodeState } from "./model.ts";
 
 export interface GeneratedDoc {
@@ -32,6 +33,16 @@ export interface GeneratedDoc {
 }
 
 export const INDEX_DOC = "00_Sirube_MOC.md";
+/** エージェント向けの仕様書。**vault にも置く。**
+ *
+ * リポジトリの `AGENTS.md` にしか無いと、インストーラで入れた人の手元には
+ * 存在しない——「AI と同じ場で進める」を売りにしておきながら、開発者以外は
+ * 仕様書を受け取れない状態だった（2026-09-02 に他人の環境を洗って発覚）。
+ *
+ * データと同じフォルダに置くので、**git で別マシンへ持っていっても、vault
+ * だけ渡しても付いてくる**。アプリのバージョンと必ず一致するので、仕様書だけ
+ * 古いという事故も起きない。 */
+export const AGENTS_DOC_PATH = "AGENTS.md";
 export const DONE_DOC = "90_達成済み.md";
 export const GOALS_DIR = "goals";
 
@@ -43,6 +54,12 @@ const TOP_IN_INDEX = 3;
  * 切って「ほか N 件」に畳むことで、目的が何ノードに育ってもサイズが
  * 頭打ちになる。 */
 const TOP_IN_GOAL = 20;
+
+/** `AGENTS.md` 用の断り書き。他の生成物と文面を変える——あちらは「真実は
+ *  `nodes/` にある」だが、こちらの正はアプリのリポジトリにある。 */
+const AGENTS_BANNER =
+  "> このファイルは Sirube が自動生成します（アプリのバージョンに追随します）。\n" +
+  "> **編集しても次の保存で上書きされます。** 消しても構いません。";
 
 const BANNER =
   "> このファイルは Sirube が自動生成します。**編集しても次の保存で上書きされます。**\n" +
@@ -66,6 +83,15 @@ function link(id: string, name: string): string {
 
 function nodeLink(g: Graph, id: string): string {
   return link(id, g.nodes[id]?.name ?? id);
+}
+
+/** `#12 ` の接頭辞。Obsidian で開いたときも同じ札で指せるようにする。
+ *
+ * `#12` をそのまま書くと Obsidian がタグとして拾ってしまう（`#` ＋ 数字）。
+ * バッククォートで囲んでタグ化を防ぐ。 */
+function numberPrefix(g: Graph, id: string): string {
+  const n = g.nodes[id]?.number;
+  return n === undefined ? "" : `\`#${n}\` `;
 }
 
 /** 自分を含まない子孫。`collectMembers` は自分を含むので落とす。 */
@@ -97,15 +123,23 @@ function actionableUnder(g: Graph, rootId: string, rev: ReverseIndex, cyclic: Re
 
 /** 目的名から層2のファイル名を作る。
  *
- * Windows で使えない文字が実在する（`リリース: v1.0` の `:` は保存時に黙って
- * 消える）ので、生成物側では明示的に潰す。ここは表示用のファイル名であって
- * id ではないため、潰した結果が衝突しても連番で避ければ足りる。大小を無視して
- * 突き合わせるのは、ファイルシステムが `Ruv` と `ruv` を同じものとして扱うため。 */
+ * **通す文字を並べる（ホワイトリスト）。** 危ない文字を並べる形にしていた時期が
+ * あるが、`[` `]` と半角スペースが漏れていた——前者は Obsidian のリンクを
+ * `[[Sirube [WIP] の道|…]]` にして壊し、後者は AI がシェル経由で触るときに
+ * クォートを1回落とすだけで壊れる。危ない文字を数え上げる側は必ず漏れる。
+ *
+ * `.` と `+` は通す（`リリース: v1.0` や `C++ に移植` が読める形で残る）。
+ * ここは表示用のファイル名であって id ではないため、潰した結果が衝突しても
+ * 連番で避ければ足りる。大小を無視して突き合わせるのは、ファイルシステムが
+ * `Ruv` と `ruv` を同じものとして扱うため。 */
 function goalFileName(name: string, taken: Set<string>): string {
-  const cleaned = name.replace(/[\\/:*?"<>|]/g, "-").replace(/[.\s]+$/, "").trim();
+  const cleaned = name
+    .replace(/[^\p{L}\p{N}_.+-]/gu, "_")
+    .replace(/_+/g, "_")
+    .replace(/^[_.]+|[_.]+$/g, "");
   const base = cleaned === "" ? "goal" : cleaned;
-  let candidate = `${base} の道`;
-  for (let n = 2; taken.has(candidate.toLowerCase()); n += 1) candidate = `${base} の道 (${n})`;
+  let candidate = `${base}_の道`;
+  for (let n = 2; taken.has(candidate.toLowerCase()); n += 1) candidate = `${base}_の道_${n}`;
   taken.add(candidate.toLowerCase());
   return candidate;
 }
@@ -222,7 +256,7 @@ function renderGoal(g: Graph, rev: ReverseIndex, cycles: CycleInfo, id: string):
       const state = STATE_LABEL[resolveState(g, d.id, cycles.cyclic)];
       const sub = progress(g, d.id);
       const tail = sub.total > 1 ? ` — ${sub.done}/${sub.total}` : "";
-      out.push(`- ${d.kind}｜${state}｜${nodeLink(g, d.id)}${tail}${dueSuffix(g, d.id)}`);
+      out.push(`- ${d.kind}｜${state}｜${numberPrefix(g, d.id)}${nodeLink(g, d.id)}${tail}${dueSuffix(g, d.id)}`);
     }
     out.push("");
   }
@@ -234,7 +268,7 @@ function renderGoal(g: Graph, rev: ReverseIndex, cycles: CycleInfo, id: string):
     for (const x of act.slice(0, TOP_IN_GOAL)) {
       const deg = inDegree(x, rev);
       const note = deg > 1 ? `（${deg} 箇所から要求されている）` : "";
-      out.push(`- ${nodeLink(g, x)}${note}${dueSuffix(g, x)}`);
+      out.push(`- ${numberPrefix(g, x)}${nodeLink(g, x)}${note}${dueSuffix(g, x)}`);
     }
     const rest = act.length - TOP_IN_GOAL;
     if (rest > 0) out.push(`- ほか ${rest} 件`);
@@ -284,6 +318,7 @@ export function renderMocs(g: Graph, rev: ReverseIndex, cycles: CycleInfo): Gene
   const docs: GeneratedDoc[] = [
     { path: INDEX_DOC, content: renderIndex(g, rev, cycles, live, goalFiles, done.length) },
     { path: DONE_DOC, content: renderDone(g, done) },
+    { path: AGENTS_DOC_PATH, content: `${AGENTS_BANNER}\n\n${AGENTS_DOC}` },
   ];
   for (const id of live) {
     docs.push({ path: `${GOALS_DIR}/${goalFiles.get(id)!}.md`, content: renderGoal(g, rev, cycles, id) });

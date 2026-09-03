@@ -14,7 +14,7 @@
 //      ACTIONABLE なので、状態バッジを6行並べても情報量はゼロ。
 //   3. 説明文は初回しか読まれない。畳んで、必要な人だけ開く。
 
-import type { Graph } from "../core/model.ts";
+import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
 import type { SearchResult } from "../core/search.ts";
 import { h, iconSpan, stateBadge } from "./dom.ts";
 
@@ -27,7 +27,7 @@ export function renderList(
   container: HTMLElement,
   graph: Graph,
   result: SearchResult,
-  opts: { title: string; query: string },
+  opts: { title: string; query: string; scoped?: boolean },
   cb: ListCallbacks,
 ): void {
   container.replaceChildren();
@@ -35,6 +35,10 @@ export function renderList(
 
   // 見出しはパンくずが出している。ここで繰り返さない。件数だけは検索時に要る
   // （サイドバーのカウントは「今やれること」の数しか持っていない）。
+  //
+  // 俯瞰の進捗はここに出さない。目的なら**サイドバーの行**が、目的以外なら
+  // **インスペクタのバー**が同じ数を既に出しており、3つ並べた画面を実際に
+  // 作ってしまった（2026-09-02 の棚卸しで実測。`4/11` が同時に3箇所）。
   if (isSearch) {
     container.append(h("div", { class: "list-head" }, [h("span", { class: "list-count" }, [`${result.total} 件`])]));
   }
@@ -63,7 +67,26 @@ export function renderList(
     if (!node) continue;
 
     const card = h("div", { class: "hit" });
+
+    // 付箋は行の左の縁に。**俯瞰では出さない**——全行が同じ目的の下にいるので
+    // 全行で同じ色になる（規則2）。パンくずを消しているのと同じ理由。
+    //
+    // 並べる順はパンくずと揃える（名前順）。行の中で色と文字が別の順で並ぶと、
+    // 3つ目の色がどの目的のものか読めない。
+    if (!opts.scoped) {
+      const tags = hit.breadcrumb
+        .map((rootId) => graph.nodes[rootId])
+        .filter((n) => n !== undefined)
+        .sort((x, y) => x.name.localeCompare(y.name, "ja"))
+        .map((n) => n.color)
+        .filter(isGoalColor);
+      if (tags.length > 0) card.append(tagStripe(tags));
+    }
+
     const main = h("button", { class: "hit-main", type: "button" });
+    // 番号は名前の前。行頭で揃うと「一覧の中の場所」ではなく「その札」として
+    // 読める（右端に置くと、パンくずや期限と並んで属性の1つに見える）。
+    if (hit.number !== undefined) main.append(h("span", { class: "hit-number" }, [`#${hit.number}`]));
     main.append(h("span", { class: "hit-name" }, [node.name]));
 
     // パンくずは名前と同じ行の右側へ。二段組をやめると行数が半分以下になる。
@@ -73,10 +96,14 @@ export function renderList(
     // `breadcrumb` は id の配列（コアは表示を決めない）。ここで名前に直す——
     // id/name を分けたあと、ここだけ id をそのまま出して行の右端に ULID が
     // 並んでいた（2026-09-01）。並び順も id ではなく名前で決める。
-    const crumbText = hit.breadcrumb
-      .map((rootId) => graph.nodes[rootId]?.name ?? rootId)
-      .sort((a, b) => a.localeCompare(b, "ja"))
-      .join(" / ");
+    // 俯瞰では全行が同じ目的の下なので出さない（規則2）。パンくずは
+    // 「どの目的に属するか」を言うためのもので、絞った時点で言い終わっている。
+    const crumbText = opts.scoped
+      ? ""
+      : hit.breadcrumb
+          .map((rootId) => graph.nodes[rootId]?.name ?? rootId)
+          .sort((a, b) => a.localeCompare(b, "ja"))
+          .join(" / ");
     const crumb = h("span", { class: "hit-crumb" }, [crumbText]);
     if (crumbText) crumb.title = `${crumbText} の下`;
     main.append(crumb);
@@ -164,4 +191,14 @@ function cycleNotice(graph: Graph, cycle: string[], cb: ListCallbacks): HTMLElem
 
   box.append(head, row, why);
   return box;
+}
+
+/** 付箋の帯。複数の目的に属するノードは、その数だけ色を縦に割る。
+ *
+ * 合流点は「片付けると2つ進む」場所なので、どちらか一方の色にしてしまうと
+ * 一覧の上位に来ている理由（入次数）と見た目が食い違う。 */
+function tagStripe(colors: GoalColor[]): HTMLElement {
+  const step = 100 / colors.length;
+  const stops = colors.map((c, i) => `var(--tag-${c}) ${i * step}% ${(i + 1) * step}%`).join(", ");
+  return h("div", { class: "hit-tag", style: `background: linear-gradient(to bottom, ${stops})` });
 }
