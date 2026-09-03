@@ -130,9 +130,12 @@ export function renderGraph(
   // `contains` を全展開しないのは、自己相似な入れ子が際限なく1画面へ広がるため。
   const edges: { from: string; to: string; kind: "requires" | "contains" }[] = [];
   const tiers: { ids: string[]; kind: "requires" | "contains" }[] = [];
-  // 同じノードは最初に出てきた段にだけ置く。合流点も輪もこれで止まる
+  // 同じノードは1回だけ置く。合流点も輪もこれで止まる
   // （線は毎回引くので、複数の親から要求されていることは見た目に残る）。
   const placed = new Set<string>([focusId]);
+  /** 見つけた順。段の中の並びをここで決める——親の順に子が並ぶので、
+   *  線が交差しにくい。 */
+  const found = new Map<string, number>();
 
   let frontier = [focusId];
   while (frontier.length > 0) {
@@ -143,11 +146,49 @@ export function renderGraph(
         edges.push({ from: pid, to: cid, kind: "requires" });
         if (placed.has(cid)) continue;
         placed.add(cid);
+        found.set(cid, found.size);
         next.push(cid);
       }
     }
-    if (next.length > 0) tiers.push({ ids: next, kind: "requires" });
     frontier = next;
+  }
+
+  /**
+   * 段は「最初に届いた深さ」ではなく **すべての親より下** で決める。
+   *
+   * 最初に届いた深さで置くと、後から別の経路でもっと深い位置に来た親から、
+   * 浅い段の子へ線が引かれる。同じ段どうし、あるいは下から上へ向かう線になり、
+   * 曲線が潰れて**線の先にノードが無いように見える**（のっち報告 2026-09-03。
+   * エッジに差し込んだ結果、合流点の片方の親が1段下がって起きた）。
+   *
+   * 反復で押し下げる。輪があると際限なく深くなるので、ノード数で打ち切る
+   * ——そこまで回れば、輪の外にあるものは全部確定している。
+   */
+  const depthOf = new Map<string, number>([[focusId, 0]]);
+  for (let pass = 0; pass < placed.size; pass += 1) {
+    let moved = false;
+    for (const e of edges) {
+      const from = depthOf.get(e.from);
+      if (from === undefined) continue;
+      if ((depthOf.get(e.to) ?? -1) < from + 1) {
+        depthOf.set(e.to, from + 1);
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+
+  const byDepth = new Map<number, string[]>();
+  for (const id of placed) {
+    if (id === focusId) continue;
+    const d = depthOf.get(id) ?? 1;
+    const row = byDepth.get(d);
+    if (row) row.push(id);
+    else byDepth.set(d, [id]);
+  }
+  for (const d of [...byDepth.keys()].sort((x, y) => x - y)) {
+    const ids = byDepth.get(d)!.sort((x, y) => (found.get(x) ?? 0) - (found.get(y) ?? 0));
+    tiers.push({ ids, kind: "requires" });
   }
 
   for (const cid of conIds) edges.push({ from: focusId, to: cid, kind: "contains" });

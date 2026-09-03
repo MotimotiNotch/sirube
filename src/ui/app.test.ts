@@ -957,6 +957,55 @@ describe("まとめて追加（DSL）", () => {
     expect($("modal-backdrop").classList.contains("hidden")).toBe(false); // 閉じない
   });
 
+  test("ノードはすべての親より下の段に置く", async () => {
+    // 最初に届いた深さで置くと、後から別の経路でもっと深い位置に来た親から、
+    // 浅い段の子へ線が引かれる。同じ段どうし、あるいは下から上へ向かう線に
+    // なって、曲線が潰れて「線の先にノードが無い」ように見える
+    // （のっち報告 2026-09-03）。
+    const id = (tail: string): string => `01M0DEEP${tail}${"0".repeat(14)}`;
+    const md = (name: string, requires: string[]): string =>
+      [
+        "---",
+        `name: ${name}`,
+        "satisfied: false",
+        requires.length === 0 ? "requires: []" : "requires:",
+        ...requires.map((r) => `  - ${r}`),
+        "contains: []",
+        "---",
+        "",
+      ].join("\n");
+
+    document.body.innerHTML = HTML;
+    localStorage.clear();
+    await startApp(
+      new MemoryFs({
+        // 目的 -> 途中 -> 合流、かつ 目的 -> 合流。合流は2つの親を持つ。
+        [id("A0")]: md("目的", [id("B0"), id("C0")]),
+        [id("B0")]: md("途中", [id("C0")]),
+        [id("C0")]: md("合流", []),
+      }),
+    );
+    findButton("root-list", "目的")!.click();
+    await tick();
+
+    const yOf = (label: string): number => {
+      const g = Array.from($("center-body").querySelectorAll("g.graph-node")).find((n) =>
+        (n.textContent ?? "").includes(label),
+      )!;
+      return Number(/translate\([\d.-]+,\s*([\d.-]+)\)/.exec(g.getAttribute("transform") ?? "")![1]);
+    };
+
+    // 合流は「途中」の子でもあるので、**途中より下**でなければならない。
+    expect(yOf("合流")).toBeGreaterThan(yOf("途中"));
+
+    // 上へ向かう線が1本も無いこと。ここが破れると曲線が潰れる。
+    const upward = Array.from($("center-body").querySelectorAll<SVGPathElement>(".graph-edge")).filter((path) => {
+      const n = (path.getAttribute("d") ?? "").match(/-?[\d.]+/g)!.map(Number);
+      return n[1]! > n[n.length - 1]!;
+    });
+    expect(upward).toEqual([]);
+  });
+
   test("ヘッダーには作る系のボタンを置かない", () => {
     // ヘッダーは「探す（検索）」「整える（自動解決）」の並び。作る系が1つだけ
     // 混ざっているのが分離感の出どころだった。
