@@ -3,7 +3,7 @@
 // サーバは無い。ストアもエンジンもここ（フロント）で動き、ファイルアクセスだけ
 // `SirubeFs` の実装を差し替える（開発中はメモリ、Tauri ではプラグイン fs）。
 
-import { analyzeCycles, buildReverseIndex, progress, resolveState, roots, type CycleInfo, type ReverseIndex } from "../core/engine.ts";
+import { analyzeCycles, buildReverseIndex, hasChildren, progress, resolveState, roots, type CycleInfo, type ReverseIndex } from "../core/engine.ts";
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
 import { parseDsl } from "../core/dsl.ts";
 import { normalizeForDuplicateCheck, planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
@@ -35,6 +35,9 @@ interface AppState {
    * いなければ気づけず、中身も分からなかった**。自動解決の「判断が必要」へ
    * 流す（2026-09-02）。 */
   issues: { id: string; problems: string[] }[];
+  /** 整合性の計画。**バッジのために毎描画で組み直さない**——グラフ全体を舐める
+   *  ので、状態が変わったときだけ（`recompute`）作り直して持ち回る。 */
+  plan: ReconcilePlan;
   /** 一覧をこのノードの配下だけに絞る（目的の「俯瞰」）。
    *
    * 一覧は俯瞰モードであって潜る画面ではない（2026-09-02 のっち）。だから
@@ -51,6 +54,29 @@ export interface AppHandle {
    * これを叩く。 */
   reload(): Promise<void>;
 }
+
+/**
+ * 「押した直後、同じ場所に別のボタンが出る」操作で2打目を飲む長さ。
+ *
+ * 2箇所で同じ形の事故が起きていた（のっち報告 2026-09-03）。
+ *
+ * - `+` を素早く2回: 1打目でモーダルが開き、**開いた瞬間にボタンの上へ背景が
+ *   覆いかぶさる**ので、2打目が背景に落ちて即座に閉じる
+ * - 俯瞰 / グラフ を素早く2回: 押すと**同じ位置に逆向きのボタンが出る**ので、
+ *   2打目がそちらに当たって元へ戻る
+ *
+ * どちらも押した本人からは「効かなかった」ようにしか見えない。よくある対策の
+ * 「押した場所で離したときだけ効かせる」は、2打目が本当に新しいボタンの上で
+ * 完結しているため効かない。時間で見るしかない。
+ *
+ * 多くの環境のダブルクリック判定（500ms 前後）より短くして、意図した2回目の
+ * 操作を邪魔しないようにしてある。
+ *
+ * **達成のトグルには掛けない。** あちらは同じ位置でラベルが入れ替わる点は同じ
+ * だが、2打目にも意味がある（間違えて押したものをすぐ戻す）。飲んでよいのは
+ * 「2打目に意味が無い」ものだけ。
+ */
+const DOUBLE_TAP_GUARD_MS = 400;
 
 /** 表示用にフォルダ名だけ取る。区切りは Windows / POSIX どちらも来る。 */
 function basename(p: string): string {
@@ -150,6 +176,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     query: "",
     trail: [],
     issues,
+    plan: planReconcile(graph),
   };
 
   restorePlace(state);
@@ -170,6 +197,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   const recompute = (): void => {
     state.rev = buildReverseIndex(state.graph);
     state.cycles = analyzeCycles(state.graph);
+    state.plan = planReconcile(state.graph);
     syncMocs();
   };
 
@@ -199,11 +227,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
 
   const newRootBtn = el<HTMLButtonElement>("new-root-btn");
   newRootBtn.append(iconSpan("plus", 15));
-  newRootBtn.addEventListener("click", () => openNewGoal());
-
-  const importBtn = el<HTMLButtonElement>("import-btn");
-  importBtn.replaceChildren(iconSpan("plus", 14), document.createTextNode("まとめて追加"));
-  importBtn.addEventListener("click", () => openImport());
+  newRootBtn.addEventListener("click", () => openAdd());
 
   const reconcileBtn = el<HTMLButtonElement>("reconcile-btn");
   reconcileBtn.replaceChildren(iconSpan("wandSparkles", 14), document.createTextNode("自動解決"));
@@ -211,11 +235,22 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   // ファイルの問題だけはボタンに件数を出す。トーストは消えるので、
   // 起動直後に見ていないと二度と気づけない。プランの件数を出さないのは、
   // 描画のたびに Tarjan と収束ループを回すことになるため。
+  /**
+   * 自動解決ボタンの出し入れ。**何も無いときは畳む。**
+   *
+   * 以前は常駐していて、バッジは `issues`（読めないファイル）だけを数えていた。
+   * 自動で直せるものが何件あっても、判断が必要なものが何件あっても**無印のまま**
+   * で、押すまで中身が分からない——「自動解決が何を示しているか分からない」
+   * （のっち 2026-09-03）の出どころがここ。
+   *
+   * 数える対象は3つ全部（直せる・判断が要る・読めない）。0 なら押す意味が無い
+   * ので出さない。**出ていること自体が「何かある」の合図**になる。
+   */
   const renderIssueBadge = (): void => {
+    const n = state.plan.fixes.length + state.plan.unresolved.length + state.issues.length;
     reconcileBtn.querySelector(".count")?.remove();
-    if (state.issues.length > 0) {
-      reconcileBtn.append(h("span", { class: "count" }, [String(state.issues.length)]));
-    }
+    reconcileBtn.classList.toggle("hidden", n === 0);
+    if (n > 0) reconcileBtn.append(h("span", { class: "count" }, [String(n)]));
   };
 
   // ---- 操作 --------------------------------------------------------------
@@ -256,6 +291,83 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     render();
   };
 
+  /**
+   * 一覧から飛ぶ。**末端は親を中心に据える。**
+   *
+   * 末端は下に何も持たないので、そこを中心にすると丸1つだけの画面になる
+   * （のっち報告 2026-09-03）。グラフの中では末端を押しても潜らないように
+   * したが、一覧からの経路には同じ穴が残っていた。親を中心にすれば、押した
+   * ものが**どの枝にぶら下がっているか**が同時に見える。
+   *
+   * 親がいない（孤立している）ノードと、下に何かあるノードはこれまでどおり。
+   */
+  const openInContext = (id: string): void => {
+    if (!state.graph.nodes[id]) return;
+    const path = pathFromRoot(state.graph, state.rev, id);
+    const parent = path[path.length - 1];
+    if (parent === undefined || hasChildren(state.graph, id)) {
+      focusFresh(id);
+      return;
+    }
+    resetViewport();
+    state.trail = path.slice(0, -1);
+    state.focusId = parent;
+    state.selectedId = id;
+    state.mode = "graph";
+    render();
+  };
+
+  /**
+   * エッジを押したときの差し込みダイアログ。
+   *
+   * `A -> B` の間に `C` を入れるのは、追加と削除だけだと3手かかる（作る・繋ぐ・
+   * 外す）。**エッジそのものを押して差し込む**のが素直だ、というのっちの指摘
+   * （2026-09-03）。関係の種類は元のエッジを引き継ぐので、ここでは選ばせない。
+   */
+  const openInsert = (parentId: string, childId: string, kind: "requires" | "contains"): void => {
+    clear(modal);
+    modal.append(h("h3", {}, ["間に差し込む"]));
+    modal.append(
+      h("p", { class: "hint" }, [
+        `「${nameOf(parentId)}」と「${nameOf(childId)}」の間に入れる。`,
+        kind === "requires"
+          ? "元の繋がりは外れ、前提の鎖が1つ伸びる。"
+          : "元の繋がりは外れ、内包が1段深くなる。",
+      ]),
+    );
+    const input = h("input", { type: "text", placeholder: "先にやること" }) as HTMLInputElement;
+    modal.append(input);
+
+    const actions = h("div", { class: "modal-actions" });
+    const cancel = h("button", { class: "btn", type: "button" }, ["キャンセル"]);
+    cancel.addEventListener("click", closeModal);
+    const ok = h("button", { class: "btn primary", type: "button" }, ["差し込む"]);
+    ok.addEventListener("click", async () => {
+      let node;
+      try {
+        node = await store.insertBetween(state.graph, parentId, childId, input.value, kind);
+      } catch (e) {
+        toast(e instanceof Error ? e.message : "差し込めませんでした");
+        return;
+      }
+      recompute();
+      closeModal();
+      state.selectedId = node.id;
+      render();
+      toast(`「${node.name}」を間に入れました`);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        ok.click();
+      }
+    });
+    actions.append(cancel, ok);
+    modal.append(actions);
+    openModal();
+    input.focus();
+  };
+
   const goList = (scopeId?: string): void => {
     state.mode = "list";
     state.scopeId = scopeId;
@@ -293,6 +405,17 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     else node.color = color;
     await store.persist(state.graph, [id]);
     render();
+  };
+
+  /** 親から選択中のノードへの繋がりを切る。ノードは残る。 */
+  const detach = async (parentId: string, childId: string): Promise<void> => {
+    const parentName = nameOf(parentId);
+    const childName = nameOf(childId);
+    if (!(await store.detachEdge(state.graph, parentId, childId))) return;
+    recompute();
+    render();
+    // 戻し方まで言う。ここを消したまま忘れると、構造をどう戻すのか分からなくなる。
+    toast(`「${parentName}」から「${childName}」を外しました（まとめて追加に「${parentName} -> ${childName}」で戻せます）`);
   };
 
   const saveNote = async (id: string, note: string): Promise<void> => {
@@ -336,9 +459,19 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   // ---- モーダル ----------------------------------------------------------
   const backdrop = el("modal-backdrop");
   const modal = el("modal");
+  let openedAt = 0;
+  /** 俯瞰 / グラフ を最後に切り替えた時刻。押すと同じ位置に逆向きのボタンが出る。 */
+  let lastSwitchAt = 0;
+
+  const openModal = (): void => {
+    openedAt = Date.now();
+    backdrop.classList.remove("hidden");
+  };
   const closeModal = (): void => backdrop.classList.add("hidden");
   backdrop.addEventListener("click", (e) => {
-    if (e.target === backdrop) closeModal();
+    if (e.target !== backdrop) return;
+    if (Date.now() - openedAt < DOUBLE_TAP_GUARD_MS) return;
+    closeModal();
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeModal();
@@ -501,7 +634,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     swap.addEventListener("click", () => void info.switchVault());
     actions.append(cancel, swap);
     modal.append(actions);
-    backdrop.classList.remove("hidden");
+    openModal();
   };
 
   /** 新しい目的を1つ起こす。
@@ -514,12 +647,45 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    * ここで作るのは「目的」だが、モデル上はただのノード（`type` は無い）。
    * ルートかどうかは入次数0から導かれるので、後から誰かの前提として繋がれば
    * 自然に目的ではなくなる。 */
-  const openNewGoal = (): void => {
+  /**
+   * ノードを作る入口。**「1つ作る」と「まとめて書く」を1枚に畳んである。**
+   *
+   * 以前は前者がサイドバーの `+`、後者がヘッダーのボタンで、離れている上に
+   * 互いを知らなかった（のっち 2026-09-03「新規作成系が分離してるイメージ」）。
+   * 行き先が違うわけではない——どちらも vault にノードが増えるだけ——なので、
+   * 場所で分ける理由が無かった。
+   *
+   * ヘッダーから外したのは、あそこが「探す（検索）」「整える（自動解決）」の
+   * 並びで、作る系が1つだけ混ざっていたため。DSL は毎日使う道具でもないので、
+   * 畳んで必要な人だけ開く形にする（表示量の原則3と同じ）。
+   *
+   * `+` の位置は動かさない。**空の vault では最初の1個を作る道がそこにしか
+   * 無い**ので、発見しやすさを落とせない（2026-09-01 にコードで確認済み）。
+   * インスペクタの「前提を一括追加」は別に残す。あれは「今見ているノードの
+   * 下に」という行き先が場所そのもので、分解の主役ボタンでもある。
+   */
+  const openAdd = (mode: "one" | "bulk" = "one"): void => {
     clear(modal);
-    modal.append(h("h3", {}, ["新しい目的"]));
+    const tabs = h("div", { class: "modal-tabs" });
+    const tab = (m: "one" | "bulk", label: string): HTMLButtonElement => {
+      const b = h("button", { class: `modal-tab${m === mode ? " on" : ""}`, type: "button" }, [label]);
+      // 押し直しで開き直す。入力中の文字は捨てる——2つのモードは書式が違う
+      // ので、持ち越しても続きにならない。
+      b.addEventListener("click", () => openAdd(m));
+      return b;
+    };
+    tabs.append(tab("one", "1つ作る"), tab("bulk", "まとめて書く"));
+    modal.append(tabs);
+
+    if (mode === "one") appendOneForm();
+    else appendBulkForm();
+    openModal();
+  };
+
+  const appendOneForm = (): void => {
     modal.append(
       h("p", { class: "hint" }, [
-        "達成したいことを1つ書く。分解（何が必要か）は作ったあとで足せる。Enter で作成。",
+        "達成したいことを1つ書く。作るとグラフが開くので、分解（何が必要か）は右の「前提を一括追加」から足せる。Enter で作成。",
       ]),
     );
     const input = h("input", { type: "text", placeholder: "引っ越す" }) as HTMLInputElement;
@@ -560,7 +726,6 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     });
     actions.append(cancel, ok);
     modal.append(actions);
-    backdrop.classList.remove("hidden");
     input.focus();
   };
 
@@ -573,9 +738,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    * `AGENTS.md` はエージェントへ「アプリの一括生成に貼る」と案内していた——
    * 存在しないドアを案内している状態だった（2026-09-02 の棚卸しで発覚）。
    */
-  const openImport = (): void => {
-    clear(modal);
-    modal.append(h("h3", {}, ["まとめて追加"]));
+  const appendBulkForm = (): void => {
     modal.append(
       h("p", { class: "hint" }, [
         "分解を書き下すと、そのままノードとエッジになる。既にある名前を書けば、そのノードに繋がる（新しくは作られない）。Ctrl+Enter で追加。",
@@ -658,7 +821,6 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     });
     actions.append(cancel, ok);
     modal.append(actions);
-    backdrop.classList.remove("hidden");
     ta.focus();
   };
 
@@ -706,13 +868,13 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     });
     actions.append(cancel, ok);
     modal.append(actions);
-    backdrop.classList.remove("hidden");
+    openModal();
     ta.focus();
   };
 
   /** 自動解決。宣言して実行し、残りを報告する。 */
   const openReconcile = (): void => {
-    const plan: ReconcilePlan = planReconcile(state.graph);
+    const plan = state.plan;
     clear(modal);
     modal.append(h("h3", {}, ["自動解決"]));
 
@@ -818,7 +980,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       actions.append(ok);
     }
     modal.append(actions);
-    backdrop.classList.remove("hidden");
+    openModal();
   };
 
   // ---- 描画 --------------------------------------------------------------
@@ -846,7 +1008,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       // 同じ場所に無いと手が止まる。
       const make = h("button", { class: "btn", type: "button", style: "margin-top:8px" });
       make.append(iconSpan("plus", 13), "目的を作る");
-      make.addEventListener("click", () => openNewGoal());
+      make.addEventListener("click", () => openAdd());
       empty.append(make);
       list.append(empty);
       return;
@@ -880,7 +1042,11 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
      * 文字ボタンで、アイコンを1つだけ混ぜると語彙が増えるため。 */
     const appendToggle = (label: string, onClick: () => void): void => {
       const btn = h("button", { class: "crumb-toggle", type: "button" }, [label]);
-      btn.addEventListener("click", onClick);
+      btn.addEventListener("click", () => {
+        if (Date.now() - lastSwitchAt < DOUBLE_TAP_GUARD_MS) return;
+        lastSwitchAt = Date.now();
+        onClick();
+      });
       bar.append(btn);
     };
 
@@ -950,7 +1116,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     // 残っているとスクロールが二重になるので、モードで切り替える。
     body.classList.toggle("graph", state.mode === "graph" && !!state.focusId);
     if (state.mode === "graph" && state.focusId) {
-      renderGraph(body, state.graph, state.focusId, state.rev, state.cycles.cyclic, { onSelect: select, onDrill: drill }, state.selectedId);
+      renderGraph(body, state.graph, state.focusId, state.rev, state.cycles.cyclic, { onSelect: select, onDrill: drill, onInsert: openInsert }, state.selectedId);
       return;
     }
     // 検索は常に全体にかける。検索欄はヘッダーにある全体の道具なので、
@@ -984,7 +1150,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
             render();
             return;
           }
-          focusFresh(id);
+          openInContext(id);
         },
         onDecompose: (cycle) => openBulkAdd(cycle[0]!),
       },
@@ -1014,6 +1180,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       onRename: (id, name) => void rename(id, name),
       onDelete: (id) => void removeNode(id),
       onColor: (id, color) => void setColor(id, color),
+      onDetach: (parentId, childId) => void detach(parentId, childId),
     });
   };
 

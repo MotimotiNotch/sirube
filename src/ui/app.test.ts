@@ -179,9 +179,10 @@ describe("ドリルダウンとインスペクタ", () => {
     expect(document.body.classList.contains("no-inspector")).toBe(false);
   });
 
-  test("一覧から飛ぶと、目的からの経路がパンくずに出る", async () => {
-    // 飛んだ先が目的の中のどこなのか、画面のどこにも出ていなかった
-    // （のっち報告 2026-09-03）。
+  test("一覧から末端へ飛ぶと、親を中心に据えてその末端を選ぶ", async () => {
+    // 末端を中心にすると丸1つだけの画面になる（のっち報告 2026-09-03）。
+    // グラフの中では潜らないようにしたが、一覧からの経路に同じ穴が残っていた。
+    // 親を中心にすれば、押したものが**どの枝にぶら下がっているか**が同時に見える。
     $("nav-actionable").click();
     await tick();
     (Array.from($("center-body").querySelectorAll(".hit-main")).find((b) =>
@@ -189,11 +190,29 @@ describe("ドリルダウンとインスペクタ", () => {
     ) as HTMLButtonElement).click();
     await tick();
 
+    expect($("breadcrumb").querySelector(".current")!.textContent).toBe("Sirube をリリースする");
+    expect($("inspector").querySelector(".insp-name")!.textContent).toBe("READMEとマニュアルを書く");
+    expect($("center-body").querySelector("g.graph-node.selected")!.textContent).toContain(
+      "READMEとマニュアルを書く",
+    );
+    // 中心が親なので、兄弟も一緒に見える。これが「どこにいるか」の手がかりになる。
+    expect(text("center-body")).toContain("MVP実装完了");
+  });
+
+  test("下に何かあるノードは、これまでどおりそこを中心にする", async () => {
+    // 検索と横断ビュー は前提を1つ持つので、中心にしても空にならない。
+    $("nav-actionable").click();
+    await tick();
+    (Array.from($("center-body").querySelectorAll(".hit-main")).find((b) =>
+      (b.textContent ?? "").includes("検索と横断ビュー"),
+    ) as HTMLButtonElement).click();
+    await tick();
+
+    expect($("breadcrumb").querySelector(".current")!.textContent).toBe("検索と横断ビュー");
     const crumb = text("breadcrumb");
     expect(crumb).toContain("Sirube をリリースする");
-    expect(crumb).toContain("READMEとマニュアルを書く");
-    // 経路の順は目的 → 現在地。逆に出ると「どこから来たか」が読めない。
-    expect(crumb.indexOf("Sirube をリリースする")).toBeLessThan(crumb.indexOf("READMEとマニュアルを書く"));
+    expect(crumb).toContain("MVP実装完了");
+    expect(crumb.indexOf("Sirube をリリースする")).toBeLessThan(crumb.indexOf("MVP実装完了"));
     // 積んだ先は押して戻れる（ただのラベルにしない）
     expect(findButton("breadcrumb", "Sirube をリリースする")).toBeTruthy();
   });
@@ -744,11 +763,206 @@ describe("改名と削除", () => {
 });
 
 describe("まとめて追加（DSL）", () => {
+  const tab = (label: string): HTMLButtonElement =>
+    Array.from($("modal").querySelectorAll(".modal-tab")).find(
+      (b) => b.textContent === label,
+    ) as HTMLButtonElement;
   const openImport = async (): Promise<HTMLTextAreaElement> => {
-    $("import-btn").click();
+    // ヘッダーの専用ボタンは畳んで、`+` のダイアログのタブにした（2026-09-03）。
+    $("new-root-btn").click();
+    await tick();
+    tab("まとめて書く").click();
     await tick();
     return $("modal").querySelector("textarea") as HTMLTextAreaElement;
   };
+
+  test("`+` から開くと「1つ作る」で、タブで切り替えられる", async () => {
+    // 新規作成の入口が2箇所に分かれて互いを知らなかった（のっち 2026-09-03）。
+    $("new-root-btn").click();
+    await tick();
+    expect(tab("1つ作る").classList.contains("on")).toBe(true);
+    expect($("modal").querySelector("textarea")).toBeNull();
+
+    tab("まとめて書く").click();
+    await tick();
+    expect(tab("まとめて書く").classList.contains("on")).toBe(true);
+    expect($("modal").querySelector("textarea")).toBeTruthy();
+
+    tab("1つ作る").click();
+    await tick();
+    expect($("modal").querySelector("input")).toBeTruthy();
+  });
+
+  test("「1つ作る」は、作ったあとどこで分解するかまで書く", () => {
+    // 「作ったあとで足せる」だけだと、どこで足すのかが分からない
+    // （のっち 2026-09-03）。この文言は初回しか読まれないので、ここで道を示す。
+    $("new-root-btn").click();
+    const hint = $("modal").querySelector(".hint")!.textContent ?? "";
+    expect(hint).toContain("前提を一括追加");
+    // 画面に出ていない語（Chain View）は使わない。UI では「グラフ」と呼んでいる。
+    expect(hint).not.toContain("Chain View");
+  });
+
+  test("自動解決は、何かあるときだけ出て件数を言う", async () => {
+    // 常駐していて無印だったので、押すまで中身が分からなかった
+    // （のっち 2026-09-03「自動解決が何を示しているか分からない」）。
+    // 数えるのは3つ全部——自動で直せる・判断が要る・読めない。
+    const btn = $("reconcile-btn");
+    // sample には輪（案件を取る ⟷ 実績を作る）があるので必ず1件以上ある
+    expect(btn.classList.contains("hidden")).toBe(false);
+    expect(btn.querySelector(".count")!.textContent).toBe("1");
+
+    // 不整合の無い vault では畳む。0 件のときに押す意味が無いので、
+    // 出ていること自体を「何かある」の合図にしてある。
+    document.body.innerHTML = HTML;
+    localStorage.clear();
+    await startApp(
+      new MemoryFs({
+        ["01M0TESTZ0" + "0".repeat(16)]: [
+          "---",
+          "name: ひとつだけ",
+          "satisfied: false",
+          "requires: []",
+          "contains: []",
+          "---",
+          "",
+        ].join("\n"),
+      }),
+    );
+    expect($("reconcile-btn").classList.contains("hidden")).toBe(true);
+  });
+
+  test("開いた直後の背景クリックでは閉じない", async () => {
+    // `+` を素早く2回押すと、2打目が背景に落ちて即座に閉じていた
+    // （のっち報告 2026-09-03）。開いた瞬間にボタンの上へ背景が覆いかぶさるので、
+    // 押した本人からは「開かなかった」ようにしか見えない。
+    const back = $("modal-backdrop");
+    $("new-root-btn").click();
+    await tick();
+    expect(back.classList.contains("hidden")).toBe(false);
+
+    back.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    expect(back.classList.contains("hidden")).toBe(false);
+
+    // 間が空けば、これまでどおり閉じる。ここを塞ぐと外を押して閉じる操作が消える。
+    await new Promise((r) => setTimeout(r, 450));
+    back.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    expect(back.classList.contains("hidden")).toBe(true);
+  });
+
+  test("俯瞰／グラフを素早く2回押しても往復しない", async () => {
+    // 押すと同じ位置に逆向きのボタンが出るので、2打目がそちらに当たって元へ
+    // 戻っていた（のっち報告 2026-09-03）。`+` の背景クリックと同じ形の事故。
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    const toggle = (): HTMLButtonElement =>
+      Array.from($("breadcrumb").querySelectorAll("button")).find((b) =>
+        ["俯瞰", "グラフ"].includes(b.textContent ?? ""),
+      ) as HTMLButtonElement;
+
+    expect(toggle().textContent).toBe("俯瞰");
+    toggle().click();
+    await tick();
+    expect(toggle().textContent).toBe("グラフ"); // 一覧へ移った
+
+    // 2打目。ここで戻ってしまうと、押した本人には「効かなかった」ように見える。
+    toggle().click();
+    await tick();
+    expect(toggle().textContent).toBe("グラフ");
+
+    // 間が空けば、これまでどおり戻れる
+    await new Promise((r) => setTimeout(r, 450));
+    toggle().click();
+    await tick();
+    expect(toggle().textContent).toBe("俯瞰");
+  });
+
+  test("繋がりだけを外せる（A -> C に B を挟む）", async () => {
+    // 追加しかできないと、B を挟んでも A -> C が残って併存する
+    // （のっち 2026-09-03。Warframe 版は reparentNode で解決済み）。
+    const cutButton = (): HTMLButtonElement =>
+      $("inspector").querySelector(".insp-cut") as HTMLButtonElement;
+
+    // 確定申告 -> 領収書整理。領収書整理 を選ぶと「これを待っている」に出る。
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    (Array.from($("center-body").querySelectorAll("g.graph-node")).find((g) =>
+      (g.textContent ?? "").includes("領収書整理"),
+    ) as unknown as SVGGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    expect(text("inspector")).toContain("確定申告");
+
+    cutButton().click();
+    await tick();
+
+    // 繋がりだけが消え、**ノードはどちらも残る**
+    expect(text("inspector")).not.toContain("これを待っている");
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    expect(text("center-body")).not.toContain("領収書整理");
+    $("nav-actionable").click();
+    await tick();
+    expect(text("center-body")).toContain("領収書整理"); // 独立して今やれることに出る
+    expect(findButton("root-list", "領収書整理")).toBeTruthy(); // 入次数0になり目的へ
+  });
+
+  test("エッジを押すと、その間にノードを差し込める", async () => {
+    // 追加と削除だけだと3手かかる（作る・繋ぐ・外す）。エッジそのものを押して
+    // 差し込むのが素直だ、というのっちの指摘（2026-09-03）。
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+
+    // 確定申告 -> 領収書整理 のエッジ。当たり判定の方を押す。
+    ($("center-body").querySelector(".graph-edge-hit") as unknown as SVGPathElement).dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    await tick();
+    expect(text("modal")).toContain("間に差し込む");
+    expect(text("modal")).toContain("確定申告");
+    expect(text("modal")).toContain("領収書整理");
+
+    const input = $("modal").querySelector("input") as HTMLInputElement;
+    input.value = "レシートを箱から出す";
+    findButton("modal", "差し込む")!.click();
+    await tick();
+
+    // 確定申告 -> レシートを箱から出す -> 領収書整理 になる。**requires は全展開**
+    // なので3つとも描かれる。「何が描かれたか」ではなく繋がりの向きで確かめる。
+    expect(text("center-body")).toContain("レシートを箱から出す");
+
+    (Array.from($("center-body").querySelectorAll("g.graph-node")).find((g) =>
+      (g.textContent ?? "").includes("領収書整理"),
+    ) as unknown as SVGGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    // 領収書整理 を待っているのは、差し込んだ方だけ。元の親からは外れている。
+    expect(text("inspector")).toContain("レシートを箱から出す");
+    expect(text("inspector")).not.toContain("確定申告");
+  });
+
+  test("差し込みで同じ名前は作らせない", async () => {
+    // 名前で参照を解決する経路があるので、同名が2つできると危ない（改名と同じ規則）。
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    ($("center-body").querySelector(".graph-edge-hit") as unknown as SVGPathElement).dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    await tick();
+    const input = $("modal").querySelector("input") as HTMLInputElement;
+    input.value = "領収書整理";
+    findButton("modal", "差し込む")!.click();
+    await tick();
+    expect(text("toast-stack")).toContain("同じ名前になります");
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(false); // 閉じない
+  });
+
+  test("ヘッダーには作る系のボタンを置かない", () => {
+    // ヘッダーは「探す（検索）」「整える（自動解決）」の並び。作る系が1つだけ
+    // 混ざっているのが分離感の出どころだった。
+    expect(document.getElementById("import-btn")).toBeNull();
+    expect(document.getElementById("reconcile-btn")).toBeTruthy();
+  });
   const type = (ta: HTMLTextAreaElement, v: string): void => {
     ta.value = v;
     ta.dispatchEvent(new Event("input"));

@@ -296,11 +296,23 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 /* 一覧とグラフの切り替え。行の右端に寄せる——左は「どこにいるか」の列なので、
  * 場所を言う要素と操作を同じ流れに混ぜない。 */
-.crumb-toggle {
+/* **セレクタは `.breadcrumb` から始める。** `.crumb-toggle` だけだと
+   `.breadcrumb button`（詳細度が1つ上）に負けて、枠も地も padding も
+   全部その値になる——ボタンに見えなかったのはこれが理由（2026-09-03）。
+   CSS の順序と詳細度は happy-dom がスタイルを評価しないためテストで
+   捕まらない。同じ罠を色見本でも踏んでいる。 */
+.breadcrumb .crumb-toggle {
   margin-left: auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  padding: 2px 10px;
+  padding: 3px 12px;
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+}
+.breadcrumb .crumb-toggle:hover {
+  background: var(--bg-panel);
+  border-color: var(--fg-faint);
+  color: var(--fg);
 }
 .breadcrumb .sep { color: var(--fg-faint); display: flex; }
 .breadcrumb .current { color: var(--fg); font-weight: 600; }
@@ -661,9 +673,15 @@ body.no-inspector #inspector-resizer {
 .graph-node text { font-size: 11px; fill: var(--fg); user-select: none; }
 /* 合流の数。印の肩に小さく。 */
 .graph-node .merge { font-size: 10px; fill: var(--fg-muted); font-variant-numeric: tabular-nums; }
-.graph-edge { stroke: var(--border-strong); fill: none; stroke-width: 1.4; }
+/* 線は --border-strong では暗すぎた。背景とのコントラストが 1.8:1 しか無く、
+   1.4px では長い線が事実上見えない（のっち報告 2026-09-03）。--fg-faint まで
+   上げると 3.5:1 になり、折り返しで 500px 走る線でも追える。 */
+.graph-edge { stroke: var(--fg-faint); fill: none; stroke-width: 1.5; }
 .graph-edge.contains { stroke-dasharray: 5 4; }
 .graph-edge.cyclic { stroke: var(--st-cyclic); stroke-width: 2; }
+/* 選んだノードに繋がる線。**色は状態色を使わない**——状態（今やれる・達成済み）
+   と選択が同じ語彙になると、線の色が何を言っているのか決まらなくなる。 */
+.graph-edge.on { stroke: var(--fg); stroke-width: 2.2; }
 .edge-label { font-size: 10px; fill: var(--fg-faint); }
 
 /* --- 中身の一覧（フライアウト） ------------------------------------------ */
@@ -686,6 +704,21 @@ body.no-inspector #inspector-resizer {
   background: var(--bg-panel);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   font-size: 12px;
+}
+
+/* エッジの当たり判定。線は 1.5px なので、そのままでは掴めない。透明な太い線を
+   重ねて押せる幅を確保する（ノードに透明な矩形を敷いているのと同じ手）。 */
+.graph-edge-hit {
+  stroke: transparent;
+  stroke-width: 14;
+  fill: none;
+  cursor: cell;
+}
+/* 押せることを見せる。強調は当たり判定に乗ったときだけ——細い線の上を
+   たまたま通っただけで太くなると鬱陶しい。 */
+.graph-edge.hover {
+  stroke: var(--st-actionable);
+  stroke-width: 2.5;
 }
 .fly-head {
   display: flex;
@@ -758,6 +791,20 @@ body.no-inspector #inspector-resizer {
   gap: 5px;
 }
 .insp-list { display: flex; flex-direction: column; gap: 4px; }
+/* 上向きリンクの行。名前を押すとそこへ移り、× でその繋がりだけを切る。 */
+.insp-link-row { display: flex; align-items: center; gap: 2px; }
+.insp-link-row .insp-link { flex: 1 1 auto; min-width: 0; }
+/* × は**ホバーで出す**。常時置くと、置いてあるだけで押される。切る操作に
+   確認モーダルを挟まない代わりに、出し方の方で事故を減らしている。 */
+.insp-cut {
+  flex: 0 0 auto;
+  opacity: 0;
+  color: var(--fg-faint);
+}
+.insp-link-row:hover .insp-cut { opacity: 1; }
+.insp-cut:hover { color: #b3261e; }
+/* キーボードで辿る人にも出す。ホバーだけを頼りにすると触れなくなる。 */
+.insp-cut:focus-visible { opacity: 1; }
 .insp-link {
   display: flex;
   align-items: center;
@@ -998,11 +1045,42 @@ body.no-inspector #inspector-resizer {
 
 /* 潜らずに選んだだけのノード。押しても絵が変わらないと「効いていない」に
    見えるので、右パネルが今どれを出しているかをグラフ側にも出す。
-   フォーカス（中心）の二重丸とは別物なので、印は輪郭で分ける。 */
-.graph-node.selected .mark {
-  stroke-width: 3px;
+
+   **印そのものは太らせない。** 印の色は状態（今やれる・達成済み・輪）を
+   言っているので、そこを太くすると状態が強くなったように見える。外に1本
+   足す方が、状態と選択が別の語彙のまま残る——兄弟が5つ6つ並ぶと、線の
+   太さだけでは拾えなかった（のっち 2026-09-03）。 */
+.sel-ring {
+  fill: none;
+  stroke: var(--fg);
+  stroke-width: 1.5;
 }
 .graph-node.selected .label {
   fill: var(--fg);
   font-weight: 600;
+}
+
+/* 追加ダイアログのタブ。「1つ作る」と「まとめて書く」の切り替え。
+   見出し（h3）の代わりにこれが最上段に来るので、選択中がタイトルとして
+   読める強さで出す。 */
+.modal-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-tab {
+  padding: 7px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+.modal-tab:hover { color: var(--fg); }
+.modal-tab.on {
+  color: var(--fg);
+  font-weight: 600;
+  border-bottom-color: var(--st-actionable);
 }

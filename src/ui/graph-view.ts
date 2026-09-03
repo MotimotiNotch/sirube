@@ -8,7 +8,7 @@
 
 import type { Graph, NodeState } from "../core/model.ts";
 import type { ReverseIndex } from "../core/engine.ts";
-import { descendantProgress, resolveState } from "../core/engine.ts";
+import { descendantProgress, hasChildren, resolveState } from "../core/engine.ts";
 import { hideFlyout, scheduleHideFlyout, showOutlineFlyout } from "./flyout.ts";
 import { consumeDragEnd, mountViewport } from "./graph-viewport.ts";
 import { mountLegend } from "./legend.ts";
@@ -54,6 +54,8 @@ function boxWidth(label: string): number {
 export interface GraphViewCallbacks {
   onSelect(id: string): void;
   onDrill(id: string): void;
+  /** エッジを押した。その2つの**間に**新しいノードを差し込む。 */
+  onInsert(parentId: string, childId: string, kind: "requires" | "contains"): void;
 }
 
 /**
@@ -208,10 +210,40 @@ export function renderGraph(
     const x2 = to.x + to.w / 2;
     const y2 = to.y + MARK_CY - MARK_R - 3;
     const mid = (y1 + y2) / 2;
-    path.setAttribute("d", `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`);
+    const d = `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`;
+    path.setAttribute("d", d);
     const isCyclic = cyclic.has(e.from) && cyclic.has(e.to);
-    path.setAttribute("class", `graph-edge ${e.kind === "contains" ? "contains" : ""} ${isCyclic ? "cyclic" : ""}`.trim());
+    // 選んだノードに繋がる線は明るくする。段が増えて折り返しが起きると線が
+    // 400〜550px 走ることがあり、薄いまま重なると**どれとどれが繋がっているか
+    // 追えない**（のっち報告 2026-09-03）。1本ずつ確かめる手がかりを足す。
+    const touchesSelection = selectedId !== undefined && (e.from === selectedId || e.to === selectedId);
+    path.setAttribute(
+      "class",
+      `graph-edge ${e.kind === "contains" ? "contains" : ""} ${isCyclic ? "cyclic" : ""} ${touchesSelection ? "on" : ""}`.trim(),
+    );
+    // 端点を持たせておく。ホバーのたびにグラフを組み直さず、この属性を見て
+    // クラスを付け替えるだけで済ませる。
+    path.dataset.from = e.from;
+    path.dataset.to = e.to;
     view.append(path);
+
+    // 当たり判定。線は 1.5px しかないので、そのままでは掴めない。太い透明な
+    // 線を重ねて、押せる幅を確保する（ノードの当たり判定に矩形を敷くのと同じ手）。
+    const hit = document.createElementNS(svgNs, "path");
+    hit.setAttribute("d", d);
+    hit.setAttribute("class", "graph-edge-hit");
+    const hitTitle = document.createElementNS(svgNs, "title");
+    hitTitle.textContent = `${graph.nodes[e.from]?.name ?? e.from} と ${graph.nodes[e.to]?.name ?? e.to} の間に差し込む`;
+    hit.append(hitTitle);
+    hit.addEventListener("click", () => {
+      if (consumeDragEnd()) return;
+      cb.onInsert(e.from, e.to, e.kind);
+    });
+    // 押せることを見せる。細い線の上を通っただけで太くなると鬱陶しいので、
+    // 強調は当たり判定に乗ったときだけにする。
+    hit.addEventListener("mouseenter", () => path.classList.add("hover"));
+    hit.addEventListener("mouseleave", () => path.classList.remove("hover"));
+    view.append(hit);
   }
 
   // ラベル（requires / contains の区別を文字でも出す。線種だけだと分かりにくい）
@@ -229,12 +261,18 @@ export function renderGraph(
     view.append(t);
   }
 
-  /** 下に**描けるものが**あるか。参照だけあって実体の無い id は数えない——
-   *  数えると、潜った先が空のまま「潜れるノード」に見える。 */
-  const hasChildren = (id: string): boolean => {
-    const n = graph.nodes[id];
-    if (!n) return false;
-    return [...n.requires, ...n.contains].some((cid) => graph.nodes[cid] !== undefined);
+  /**
+   * ホバーしているノードに繋がる線を明るくする。**選択ではなくホバーで出す。**
+   *
+   * 選択で出す形にしていたが、子があるノードは押すと潜ってしまうので、
+   * 「この枝がどこへ繋がっているか」を確かめる手段にならなかった。ホバーなら
+   * 画面が変わらない。指を外したら、選んでいるノードの線に戻す。
+   */
+  const highlightEdges = (hovered: string | undefined): void => {
+    const target = hovered ?? selectedId;
+    for (const p of Array.from(view.querySelectorAll<SVGPathElement>(".graph-edge"))) {
+      p.classList.toggle("on", target !== undefined && (p.dataset.from === target || p.dataset.to === target));
+    }
   };
 
   for (const b of boxes) {
@@ -268,6 +306,18 @@ export function renderGraph(
     mark.setAttribute("cy", String(MARK_CY));
     mark.setAttribute("r", String(r));
     g.append(mark);
+
+    // 選んでいるノードは輪で囲う。**印そのものは太らせない**——印の色は状態
+    // （今やれる・達成済み・輪）を言っているので、そこを太くすると状態が強く
+    // なったように見える。外に1本足す方が、状態と選択が別の語彙のまま残る。
+    if (b.id === selectedId) {
+      const ring = document.createElementNS(svgNs, "circle");
+      ring.setAttribute("class", "sel-ring");
+      ring.setAttribute("cx", String(cx));
+      ring.setAttribute("cy", String(MARK_CY));
+      ring.setAttribute("r", String(r + 4));
+      g.append(ring);
+    }
 
     // 下に何かあるか＝弧が出るかどうか、どれだけ済んでいるか＝弧の長さ。
     // `下にN` という文字を置き換えたもの。数は title へ逃がす。
@@ -331,7 +381,7 @@ export function renderGraph(
       // 行って戻るのに往復2クリックかかる（のっち報告 2026-09-03「無駄に前提で
       // ドリルされるとよく分からない。クリックが余計に要求されてる」）。
       // 潜って得られるものは、選んだときに右パネルへ出るものと同じ。
-      if (b.kind === "focus" || !hasChildren(b.id)) cb.onSelect(b.id);
+      if (b.kind === "focus" || !hasChildren(graph, b.id)) cb.onSelect(b.id);
       else cb.onDrill(b.id);
     });
 
@@ -339,7 +389,11 @@ export function renderGraph(
     // 対象にする——ここは移植元と違うところで、あちらはグラフが requires を
     // 全展開していたので起点を除いていた。こちらは直下1ホップしか描かない
     // ぶん、起点の配下こそ一覧が要る。
-    if (hasChildren(b.id)) {
+    // 線の強調は全ノードに付ける。フライアウト（下にあるものの一覧）は
+    // 子があるときだけなので、条件を分けてある。
+    g.addEventListener("mouseenter", () => highlightEdges(b.id));
+    g.addEventListener("mouseleave", () => highlightEdges(undefined));
+    if (hasChildren(graph, b.id)) {
       g.addEventListener("mouseenter", () => showOutlineFlyout(g, graph, b.id, cb.onDrill));
       g.addEventListener("mouseleave", scheduleHideFlyout);
     }
