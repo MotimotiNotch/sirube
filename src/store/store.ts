@@ -187,6 +187,72 @@ export class MarkdownGraphStore {
   }
 
   /** ワンタップトグル。カスケードで巻き込まれたノードも一緒に書く。 */
+  /**
+   * 親から子への繋がりだけを切る。**ノードは残す。**
+   *
+   * `A -> C` があるところへ `B` を挟んで `A -> B -> C` にしたいとき、追加だけ
+   * では `A -> C` が残って併存する。**ストアに構造を変える操作が1つも無かった**
+   * （のっち 2026-09-03。Warframe 版は `reparentNode` で解決済み）。
+   *
+   * 付け直す側は作らない。`requires` / `contains` に既存の名前を書けばそこへ
+   * 繋がる入口が既に2つある（まとめて追加・前提を一括追加）ので、**外す側さえ
+   * あれば往復する**。あちらが付け替えを1操作にまとめたのは、名前で繋ぐ入口が
+   * 無かったからだと思われる。
+   *
+   * 戻ってくる値は「実際に切ったか」。無い繋がりを指定されても黙って何もしない
+   * ——UI は逆引きから作った一覧を出しているので、そこにあるものしか渡らない。
+   */
+  async detachEdge(graph: Graph, parentId: string, childId: string): Promise<boolean> {
+    const parent = graph.nodes[parentId];
+    if (!parent) return false;
+    const before = parent.requires.length + parent.contains.length;
+    parent.requires = parent.requires.filter((id) => id !== childId);
+    parent.contains = parent.contains.filter((id) => id !== childId);
+    if (parent.requires.length + parent.contains.length === before) return false;
+    await this.persist(graph, [parentId]);
+    return true;
+  }
+
+  /**
+   * `parent -> child` の**間に**新しいノードを差し込む。
+   *
+   * 追加と削除しか無いと、`A -> B` の間に `C` を入れるのに3手かかる——`C` を
+   * 作って `A` に足し、`C` に `B` を足し、`A -> B` を外す。**エッジそのものを
+   * 押して差し込む**のが素直だ、というのっちの指摘（2026-09-03）を受けて1手に
+   * まとめる。
+   *
+   * 関係の種類は元のエッジを引き継ぐ。`A requires B` なら `A requires C` と
+   * `C requires B` に、`contains` なら両方 `contains` に。**片方だけ種類を
+   * 変えると、間に挟んだだけのつもりが意味の違う繋がりに化ける。**
+   *
+   * 並び順は `map` で置き換えて保つ。差し込んだものが末尾へ飛ぶと、元の並びを
+   * 手掛かりに読んでいた側が迷子になる。
+   */
+  async insertBetween(
+    graph: Graph,
+    parentId: string,
+    childId: string,
+    name: string,
+    kind: "requires" | "contains",
+  ): Promise<Node> {
+    const parent = graph.nodes[parentId];
+    if (!parent) throw new Error(`node "${parentId}" not found`);
+    if (!parent[kind].includes(childId)) throw new Error("その繋がりはもうありません");
+
+    const trimmed = name.trim();
+    if (trimmed === "") throw new Error("名前を入れてください");
+    // 同名は作らせない（`renameNode` と同じ理由。名前で参照を解決する経路がある）。
+    const key = normalizeForDuplicateCheck(trimmed);
+    const clash = Object.values(graph.nodes).find((n) => normalizeForDuplicateCheck(n.name) === key);
+    if (clash) throw new Error(`「${clash.name}」と同じ名前になります`);
+
+    const node = await this.mint(graph, trimmed);
+    parent[kind] = parent[kind].map((id) => (id === childId ? node.id : id));
+    node[kind] = [childId];
+    await this.persist(graph, [parentId, node.id]);
+    return node;
+  }
+
   async toggle(graph: Graph, id: string): Promise<string[]> {
     const rev = buildReverseIndex(graph);
     const changed = toggleSatisfied(graph, id, rev);

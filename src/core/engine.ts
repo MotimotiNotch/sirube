@@ -375,6 +375,19 @@ export function roots(g: Graph, rev: ReverseIndex): string[] {
     .sort();
 }
 
+/**
+ * 下に**描けるものが**あるか。参照だけあって実体の無い id は数えない。
+ *
+ * 「潜る意味があるか」の判定に使う。数えてしまうと、潜った先が空のまま
+ * 「潜れるノード」に見える。`requires` と `contains` の両方を見るのは、
+ * どちらも「下に何かある」ことに変わりないため。
+ */
+export function hasChildren(g: Graph, id: string): boolean {
+  const n = g.nodes[id];
+  if (!n) return false;
+  return [...n.requires, ...n.contains].some((cid) => g.nodes[cid] !== undefined);
+}
+
 /** 合流点の入次数。「片付ければ何個の枝が進むか」＝構造から出る優先度。 */
 export function inDegree(id: string, rev: ReverseIndex): number {
   return (rev.requiredBy.get(id)?.length ?? 0) + (rev.containedBy.get(id)?.length ?? 0);

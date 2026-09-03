@@ -22,6 +22,8 @@ export interface InspectorCallbacks {
   onDelete(id: string): void;
   /** 付箋の色を貼る／外す（`undefined` で外す）。 */
   onColor(id: string, color: GoalColor | undefined): void;
+  /** `parentId` から選択中のノードへの繋がりだけを切る（ノードは残す）。 */
+  onDetach(parentId: string, childId: string): void;
 }
 
 export function renderInspector(
@@ -167,11 +169,25 @@ export function renderInspector(
     const list = h("div", { class: "insp-list" });
     for (const id of ids) {
       const child = graph.nodes[id];
+      const row = h("div", { class: "insp-link-row" });
       const btn = h("button", { class: "insp-link", type: "button" });
       btn.append(child ? stateDot(resolveState(graph, id, cyclic)) : stateDot("BLOCKED"));
       btn.append(h("span", {}, [child?.name ?? `${id}（未作成）`]));
       btn.addEventListener("click", () => cb.onFocus(id));
-      list.append(btn);
+
+      // この繋がりだけを切る。**確認は挟まない**——ノードは残るし、戻すのは
+      // 「まとめて追加」に1行書くだけで済む（既存の名前を書けばそこへ繋がる）。
+      // 代わりにホバーで出す形にして、置いてあるだけで押される事故を避ける。
+      const cut = h("button", {
+        class: "icon-btn insp-cut",
+        type: "button",
+        title: `${child?.name ?? id} との繋がりを外す（ノードは残る）`,
+      });
+      cut.append(iconSpan("x", 12));
+      cut.addEventListener("click", () => cb.onDetach(id, selectedId));
+
+      row.append(btn, cut);
+      list.append(row);
     }
     sec.append(list);
     container.append(sec);
