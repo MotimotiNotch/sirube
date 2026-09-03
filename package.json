@@ -9,9 +9,12 @@
     "build:web": "bun run scripts/build-web.ts",
     "tauri": "tauri",
     "release": "bun run scripts/release.ts",
+    "release:linux": "sh scripts/linux/build-appimage.sh",
     "icons": "bun run scripts/gen-icons.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "agents-doc": "bun run scripts/gen-agents-doc.ts",
+    "test-doc": "bun run scripts/gen-test-doc.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
