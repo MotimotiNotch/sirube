@@ -9,3 +9,8 @@
 *.ico binary
 *.png binary
 *.icns binary
+
+# Dockerfile は拡張子が無く `*.sh` に当たらない。コンテナの中で読まれるので
+# CRLF が混ざると壊れる（手元のワーキングコピーは LF のままなので、
+# clone し直したときに初めて壊れる類の罠になる）。
+scripts/linux/Dockerfile text eol=lf
