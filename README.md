@@ -42,14 +42,21 @@
 
 ### 1. 入れる
 
-Windows 向けにインストーラ（`Sirube_0.1.0_x64-setup.exe` / 約 2MB）を作れる。**まだ配布はしていない**ので、今は自分でビルドする:
+[Releases](https://github.com/MotimotiNotch/sirube/releases) から Windows 向けインストーラ（`Sirube_0.1.0_x64-setup.exe` / 約 2MB）を落として実行する。
+
+> インストール時に **「Windows によって PC が保護されました」** と出る。コード署名証明書を取っていないだけで、警告の中身は「発行元が確認できない」。**詳細情報 → 実行** で進める。
+
+外部通信もアカウントも無い。入れたら終わり。
+
+<details>
+<summary>自分でビルドする場合</summary>
 
 ```
 bun install
 bun run release        # 要 MSVC。src-tauri/target/release/bundle/nsis/ に出る
 ```
 
-外部通信もアカウントも無い。入れたら終わり。
+</details>
 
 ### 2. 最初に開くフォルダを決める
 
