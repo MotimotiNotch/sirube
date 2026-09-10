@@ -3,7 +3,7 @@
 // サーバは無い。ストアもエンジンもここ（フロント）で動き、ファイルアクセスだけ
 // `SirubeFs` の実装を差し替える（開発中はメモリ、Tauri ではプラグイン fs）。
 
-import { analyzeCycles, buildReverseIndex, hasChildren, progress, resolveState, roots, type CycleInfo, type ReverseIndex } from "../core/engine.ts";
+import { analyzeCycles, buildReverseIndex, hasChildren, progress, resolveState, roots, type CycleInfo, type ReverseIndex, type TogglePlan } from "../core/engine.ts";
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
 import { parseDsl } from "../core/dsl.ts";
 import { normalizeForDuplicateCheck, planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
@@ -162,6 +162,17 @@ function restorePlace(state: AppState): void {
   }
   // ここに来たら TOP。経路だけ残しても出す場所が無い。
   state.trail = [];
+}
+
+/** 2つの下見が同じことを言っているか。**順序も含めて**比べる——同じ顔ぶれでも
+ *  理由や辿り方が変わっていれば、人が見たのは別の計画。 */
+function samePlan(a: TogglePlan, b: TogglePlan): boolean {
+  if (a.target !== b.target || a.satisfied !== b.satisfied) return false;
+  if (a.changes.length !== b.changes.length) return false;
+  return a.changes.every((c, i) => {
+    const other = b.changes[i]!;
+    return c.kind === other.kind && c.id === other.id;
+  });
 }
 
 export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<AppHandle> {
@@ -389,8 +400,45 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     render();
   };
 
+  /**
+   * 達成のトグル。**押したノード以外の達成状態まで書き換わるときは、先に見せる。**
+   *
+   * 止めるのは2つだけ——`requires` の遡及（後が終わったなら前も、で前提を埋める）
+   * と、取り消しの下流（前提が崩れたなら上に積んだものも戻す）。この2つは実データで
+   * 一度に15件を書き換えた（2026-09-09、`生活の収入をつくる` を押したら
+   * `Sirube を完成させる` `MVP実装完了` まで達成になった）。**表示ではなくファイルへの
+   * 書き込み**なので、押し間違いの実害が他の操作と違う。
+   *
+   * `contains` の親が立つのは止めない。親に固有の作業が無いからこそ `contains` に
+   * したのであって、子と前提が揃った時点で親が終わっているのは定義そのもの。
+   * ここまで確認を挟むと、末端を1つ潰すたびにダイアログが出る。
+   *
+   * 件数で閾値を切らない（「3件以上なら聞く」等）。**その線を跨がない書き換えが
+   * 黙って通る**ことになり、静かに書かれるという問題そのものは残る。
+   */
   const toggle = async (id: string): Promise<void> => {
-    const changed = await store.toggle(state.graph, id);
+    const plan = store.planToggle(state.graph, id);
+    const retro = plan.changes.some((c) => c.kind === "prerequisite" || c.kind === "dependent");
+    if (!retro) {
+      await applyToggle(plan);
+      return;
+    }
+    openTogglePreview(plan);
+  };
+
+  const applyToggle = async (plan: TogglePlan): Promise<void> => {
+    // 下見を出している間に、外からファイルが書き換わることがある（Tauri は
+    // `watchNodes` で読み直してグラフを差し替える）。**古くなった計画は書かない**
+    // ——見せたものと違うものを書いたら、確認を取った意味がそこで消える。
+    // 下見を挟まない経路でも同じ検査を通る（作ったばかりの計画なので必ず一致する）。
+    const fresh = state.graph.nodes[plan.target] ? store.planToggle(state.graph, plan.target) : undefined;
+    if (!fresh || !samePlan(fresh, plan)) {
+      recompute();
+      render();
+      toast("ファイルが外で変わったので、もう一度押してください");
+      return;
+    }
+    const changed = await store.applyToggle(state.graph, plan);
     recompute();
     render();
     if (changed.length > 1) toast(`${changed.length} 件が連動して変わりました`);
@@ -870,6 +918,75 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     modal.append(actions);
     openModal();
     ta.focus();
+  };
+
+  /**
+   * トグルの下見。**書く前に、何が一緒に動くかを名前で出す。**
+   *
+   * 自動解決（`openReconcile`）は前からプレビューを出してから実行していたのに、
+   * トグルだけが黙って書いていた。起きていることは同じ「前提を埋める」なので、
+   * 入口が違うだけで見え方が変わるのは筋が通らない。出し方も揃えてある。
+   *
+   * 部分適用はできない形にした（実行かキャンセルの2択）。1件だけ拒むと
+   * 「達成なのに前提が未達」がそのまま残り、次の自動解決が同じ提案を持って
+   * 戻ってくる。**繋がりが AND として間違っているなら、直すのは構造の方**——
+   * 「どれか1つでいい」ものは前提ではなく選択肢なので、そもそも繋がない。
+   */
+  const openTogglePreview = (plan: TogglePlan): void => {
+    clear(modal);
+    const on = plan.satisfied;
+    modal.append(h("h3", {}, [on ? "達成にすると、前提も達成になります" : "達成を取り消すと、下流も戻ります"]));
+    modal.append(
+      h("p", { class: "hint" }, [
+        on
+          ? "「後が終わっているなら、前も終わっていたはず」として遡ります。ファイルに書き込むので、内容を確認してください。"
+          : "「前提が崩れたなら、その上に積んだものも本当は終わっていない」として戻します。前提側には触りません。",
+      ]),
+    );
+
+    modal.append(
+      h("h4", { style: "margin:12px 0 4px;font-size:12px" }, [`書き換わる（${plan.changes.length}）`]),
+    );
+    const ul = h("ul", { class: "plan-list" });
+    for (const c of plan.changes) {
+      const li = h("li");
+      switch (c.kind) {
+        case "target":
+          li.append(h("span", { class: "plan-kind" }, [c.satisfied ? "達成にする" : "達成を戻す"]), nameOf(c.id));
+          break;
+        case "prerequisite":
+          li.append(h("span", { class: "plan-kind" }, ["前提を埋める"]), `${nameOf(c.id)}（${nameOf(c.via)} の前提）`);
+          break;
+        case "contains-parent":
+          li.append(h("span", { class: "plan-kind" }, ["親を達成に"]), `${nameOf(c.id)}（子が全部揃った）`);
+          break;
+        case "dependent":
+          li.append(h("span", { class: "plan-kind" }, ["達成を戻す"]), `${nameOf(c.id)}（${nameOf(c.via)} が戻るため）`);
+          break;
+      }
+      ul.append(li);
+    }
+    modal.append(ul);
+
+    if (on) {
+      modal.append(
+        h("p", { class: "hint" }, [
+          "覚えのないものが並んでいたら、前提が AND になっているか疑ってください。「どれか1本立てばいい」ものは前提ではなく選択肢なので、繋がずにメモへ書きます。",
+        ]),
+      );
+    }
+
+    const actions = h("div", { class: "modal-actions" });
+    const cancel = h("button", { class: "btn", type: "button" }, ["キャンセル"]);
+    cancel.addEventListener("click", closeModal);
+    const ok = h("button", { class: "btn primary", type: "button" }, [on ? "達成にする" : "取り消す"]);
+    ok.addEventListener("click", async () => {
+      closeModal();
+      await applyToggle(plan);
+    });
+    actions.append(cancel, ok);
+    modal.append(actions);
+    openModal();
   };
 
   /** 自動解決。宣言して実行し、残りを報告する。 */

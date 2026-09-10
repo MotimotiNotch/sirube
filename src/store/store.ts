@@ -4,7 +4,15 @@
 // 読んで全体を書き戻していた。ここでは**変更されたノードのファイルだけ**を
 // 書く。git diff が「誰がどのノードを完了したか」そのものになるのが狙い。
 
-import { analyzeCycles, buildReverseIndex, toggleSatisfied, type ReverseIndex } from "../core/engine.ts";
+import {
+  analyzeCycles,
+  applyTogglePlan,
+  buildReverseIndex,
+  planToggle,
+  toggleSatisfied,
+  type ReverseIndex,
+  type TogglePlan,
+} from "../core/engine.ts";
 import { parseBulkRequires, parseDsl, type DslParseResult } from "../core/dsl.ts";
 import { newGraph, newNode, type Graph, type Node } from "../core/model.ts";
 import { GOALS_DIR, renderMocs } from "../core/moc.ts";
@@ -253,9 +261,24 @@ export class MarkdownGraphStore {
     return node;
   }
 
+  /** 下見を挟まず一気にやる。**画面はこちらを使わない**（2026-09-10 以降、UI は
+   *  `planToggle` → 確認 → `applyToggle` を通る）。台本や移行スクリプトのような
+   *  「人が見ていない場所」から呼ぶための入口として残してある。 */
   async toggle(graph: Graph, id: string): Promise<string[]> {
     const rev = buildReverseIndex(graph);
     const changed = toggleSatisfied(graph, id, rev);
+    await this.persist(graph, changed);
+    return changed;
+  }
+
+  /** トグルの下見。ファイルには何も書かない（`applyToggle` で確定する）。 */
+  planToggle(graph: Graph, id: string): TogglePlan {
+    return planToggle(graph, id, buildReverseIndex(graph));
+  }
+
+  /** 下見を確定させる。書くのはここだけ。 */
+  async applyToggle(graph: Graph, plan: TogglePlan): Promise<string[]> {
+    const changed = applyTogglePlan(graph, plan);
     await this.persist(graph, changed);
     return changed;
   }

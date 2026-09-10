@@ -273,13 +273,22 @@ describe("ドリルダウンとインスペクタ", () => {
     expect($("inspector").querySelector(".insp-name")!.textContent).toBe("整合性の自動解決");
   });
 
-  test("インスペクタから達成にすると前提まで連動する", async () => {
+  test("インスペクタから達成にすると、前提の連動を先に見せてから書く", async () => {
     // 事前: 領収書整理は「今やれること」に出ている
     expect(text("center-body")).toContain("領収書整理");
 
     findButton("root-list", "確定申告")!.click();
     await tick();
     findButton("inspector", "達成にする")!.click();
+    await tick();
+
+    // まだ書いていない。何が一緒に動くかを名前で出す（2026-09-10）。
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(false);
+    expect(text("modal")).toContain("前提を埋める");
+    expect(text("modal")).toContain("領収書整理");
+    expect(text("inspector")).toContain("達成にする");
+
+    findButton("modal", "達成にする")!.click();
     await tick();
     expect(text("inspector")).toContain("達成を取り消す");
 
@@ -288,6 +297,61 @@ describe("ドリルダウンとインスペクタ", () => {
     $("nav-actionable").click();
     await tick();
     expect(text("center-body")).not.toContain("領収書整理");
+  });
+
+  test("下見をキャンセルすると1件も書かない", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    findButton("inspector", "達成にする")!.click();
+    await tick();
+    findButton("modal", "キャンセル")!.click();
+    await tick();
+
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(true);
+    // 押した本人も動かない。**部分適用はしない**——1件だけ拒むと「達成なのに
+    // 前提が未達」が残り、次の自動解決が同じ提案を持って戻ってくる。
+    expect(text("inspector")).toContain("達成にする");
+    $("nav-actionable").click();
+    await tick();
+    expect(text("center-body")).toContain("領収書整理");
+  });
+
+  test("下見を出している間にファイルが外で変わったら、その計画では書かない", async () => {
+    // Tauri は `watchNodes` で外の書き換えを拾ってグラフを差し替える。見せた
+    // ものと違うものを書いたら、確認を取った意味がそこで消える。
+    const fs = sampleFs();
+    document.body.innerHTML = HTML;
+    const app = await startApp(fs);
+
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    findButton("inspector", "達成にする")!.click();
+    await tick();
+    expect(text("modal")).toContain("前提を埋める");
+
+    // 外（Obsidian / AI）で前提が先に達成になった。
+    const entry = Array.from(fs.files.entries()).find(([, f]) => f.content.includes("name: 領収書整理"))!;
+    fs.files.set(entry[0], { content: entry[1].content.replace("satisfied: false", "satisfied: true"), mtimeMs: fs.tick() });
+    await app.reload();
+
+    findButton("modal", "達成にする")!.click();
+    await tick();
+    expect(text("toast-stack")).toContain("もう一度押してください");
+    expect(text("inspector")).toContain("達成にする"); // 確定申告は動いていない
+  });
+
+  test("連動先が無いトグルは下見を挟まない", async () => {
+    // 末端（前提を持たない）を潰すのは一番よくある操作。ここで毎回ダイアログが
+    // 出ると、確認そのものが読み飛ばされる合図になる。
+    const before = text("center-body");
+    expect(before).toContain("領収書整理");
+    findButton("center-body", "領収書整理")!.click();
+    await tick();
+    findButton("inspector", "達成にする")!.click();
+    await tick();
+
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(true);
+    expect(text("inspector")).toContain("達成を取り消す");
   });
 
   test("輪の上のノードを開くと「割る」案内が出る", async () => {
@@ -503,6 +567,11 @@ describe("グラフの拡大縮小と移動", () => {
     const zoomed = scale();
     // 達成のトグルでも描き直しは走る。そのたびに戻ると手元が飛ぶ。
     findButton("inspector", "達成にする")!.click();
+    await tick();
+    // 前提が連動するノードなら下見が挟まる。確定させないと描き直しが走らず、
+    // この検査が「何も起きなかったから動かない」で通ってしまう。
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(false);
+    findButton("modal", "達成にする")!.click();
     await tick();
     expect(scale()).toBe(zoomed);
     // 別のノードへ潜ったら初期位置から。

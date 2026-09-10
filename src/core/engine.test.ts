@@ -10,6 +10,7 @@ import {
   findCycles,
   inDegree,
   neighbors,
+  planToggle,
   progress,
   resolveState,
   roots,
@@ -202,6 +203,64 @@ describe("カスケード", () => {
     toggleSatisfied(graph, "部品A", rev);
     expect(resolveState(graph, "目的")).toBe("BLOCKED");
     expect(graph.nodes["目的"]!.satisfied).toBe(false);
+  });
+});
+
+describe("トグルの下見", () => {
+  test("計画を立てただけではグラフを触らない", () => {
+    const graph = g("引っ越し -> 引っ越し先の家 -> 不動産に行く");
+    const plan = planToggle(graph, "引っ越し先の家", buildReverseIndex(graph));
+    expect(plan.satisfied).toBe(true);
+    for (const id of Object.keys(graph.nodes)) expect(graph.nodes[id]!.satisfied).toBe(false);
+  });
+
+  test("下見の内容と、実際に書き換わるものが一致する", () => {
+    // ここがずれると「見せたもの」と「書いたもの」が別になる。プレビューを
+    // 別実装にしない理由そのものなので、テストでも縛っておく。
+    const graph = g("目的 -> 手順書 -> 下調べ, 目的 -> [部品A]");
+    const rev = buildReverseIndex(graph);
+    const plan = planToggle(graph, "手順書", rev);
+    const changed = toggleSatisfied(graph, "手順書", rev);
+    expect(changed.sort()).toEqual(plan.changes.map((c) => c.id).sort());
+  });
+
+  test("連動の理由を持つ（前提か・親の集約か・下流か）", () => {
+    const graph = g("目的 -> 手順書, 目的 -> [部品A], 手順書 -> 下調べ");
+    const rev = buildReverseIndex(graph);
+    graph.nodes["部品A"]!.satisfied = true;
+    const plan = planToggle(graph, "手順書", rev);
+    expect(plan.changes).toEqual([
+      { kind: "target", id: "手順書", satisfied: true },
+      { kind: "prerequisite", id: "下調べ", via: "手順書" },
+      { kind: "contains-parent", id: "目的" },
+    ]);
+  });
+
+  test("取り消しの下見は下流だけを挙げる", () => {
+    const graph = g("引っ越し -> 引っ越し先の家 -> 不動産に行く");
+    for (const id of Object.keys(graph.nodes)) graph.nodes[id]!.satisfied = true;
+    const plan = planToggle(graph, "引っ越し先の家", buildReverseIndex(graph));
+    expect(plan.satisfied).toBe(false);
+    expect(plan.changes).toEqual([
+      { kind: "target", id: "引っ越し先の家", satisfied: false },
+      { kind: "dependent", id: "引っ越し", via: "引っ越し先の家" },
+    ]);
+  });
+
+  test("既に達成済みの前提は連動に数えない", () => {
+    // 「N件が書き換わります」に、実際には書かれないものを混ぜない。
+    const graph = g("引っ越し -> 引っ越し先の家 -> 不動産に行く");
+    graph.nodes["不動産に行く"]!.satisfied = true;
+    const plan = planToggle(graph, "引っ越し先の家", buildReverseIndex(graph));
+    expect(plan.changes).toEqual([{ kind: "target", id: "引っ越し先の家", satisfied: true }]);
+  });
+
+  test("同じノードへ2つの理由で届いても1件", () => {
+    const graph = g("目的 -> 前A -> 共通, 目的 -> 前B -> 共通");
+    const rev = buildReverseIndex(graph);
+    const plan = planToggle(graph, "目的", rev);
+    expect(plan.changes.filter((c) => c.id === "共通").length).toBe(1);
+    expect(plan.changes.length).toBe(4);
   });
 });
 

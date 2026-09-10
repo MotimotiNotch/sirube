@@ -239,20 +239,39 @@ export function blockedByCycle(g: Graph, nodeId: string, cyclic: ReadonlySet<str
 // カスケード
 // ---------------------------------------------------------------------------
 
+/** カスケードが1件書き換えるたびに呼ばれる記録係。
+ *
+ * これが要るのは、**トグルを「黙って書く」から「見せてから書く」へ寄せた**
+ * ため（2026-09-10）。プレビューは実際のカスケードとは別の理屈で作ってはいけない
+ * ——`resolveState` とカスケードが食い違った 2026-09-02 と同じ穴が、今度は
+ * 「見せたもの」と「書いたもの」の間に開く。なので**計画も適用も同じこの関数群を
+ * 通し**、違いは「本物のグラフに書くか、写しに書くか」だけにしてある。 */
+export type CascadeLog = (change: ToggleChange) => void;
+
 /**
  * 達成したノードの `requires` 連鎖を遡り、前提も全部達成にする。
  * 「後が終わっているなら、前も終わっていたはず」という `requires` の意味論。
  *
  * `contains` は辿らない（親が満たされても部品が揃ったことにはならない）。
  */
-export function cascadeSatisfyRequires(g: Graph, nodeId: string, seen: Set<string> = new Set()): void {
+export function cascadeSatisfyRequires(
+  g: Graph,
+  nodeId: string,
+  seen: Set<string> = new Set(),
+  log?: CascadeLog,
+): void {
   if (seen.has(nodeId)) return;
   seen.add(nodeId);
   for (const reqId of g.nodes[nodeId]?.requires ?? []) {
     const req = g.nodes[reqId];
     if (!req) continue;
-    req.satisfied = true;
-    cascadeSatisfyRequires(g, reqId, seen);
+    // 既に達成のものは「変わらない」ので記録しない。辿るのは従来どおり続ける
+    // ——途中に達成済みが挟まっていても、その先に未達の前提は残りうる。
+    if (!req.satisfied) {
+      req.satisfied = true;
+      log?.({ kind: "prerequisite", id: reqId, via: nodeId });
+    }
+    cascadeSatisfyRequires(g, reqId, seen, log);
   }
 }
 
@@ -272,14 +291,18 @@ export function cascadeUnsatisfyDependents(
   nodeId: string,
   rev: ReverseIndex,
   seen: Set<string> = new Set(),
+  log?: CascadeLog,
 ): void {
   if (seen.has(nodeId)) return;
   seen.add(nodeId);
   for (const depId of rev.requiredBy.get(nodeId) ?? []) {
     const dep = g.nodes[depId];
     if (!dep) continue;
-    dep.satisfied = false;
-    cascadeUnsatisfyDependents(g, depId, rev, seen);
+    if (dep.satisfied) {
+      dep.satisfied = false;
+      log?.({ kind: "dependent", id: depId, via: nodeId });
+    }
+    cascadeUnsatisfyDependents(g, depId, rev, seen, log);
   }
 }
 
@@ -299,6 +322,7 @@ export function cascadeSatisfyContainsParents(
   nodeId: string,
   rev: ReverseIndex,
   seen: Set<string> = new Set(),
+  log?: CascadeLog,
 ): void {
   if (seen.has(nodeId)) return;
   seen.add(nodeId);
@@ -324,40 +348,96 @@ export function cascadeSatisfyContainsParents(
       parent.requires.every((reqId) => g.nodes[reqId]?.satisfied);
     if (!ready) continue;
     parent.satisfied = true;
-    cascadeSatisfyRequires(g, parentId);
-    cascadeSatisfyContainsParents(g, parentId, rev, seen);
+    log?.({ kind: "contains-parent", id: parentId });
+    cascadeSatisfyRequires(g, parentId, new Set(), log);
+    cascadeSatisfyContainsParents(g, parentId, rev, seen, log);
   }
+}
+
+// ---------------------------------------------------------------------------
+// トグルの計画と適用
+// ---------------------------------------------------------------------------
+
+/** トグル1回でファイルに書かれる変更、1件ぶん。**理由まで持つ**——
+ *  「なぜこれが一緒に動くのか」が言えないと、プレビューはただの一覧になる。 */
+export type ToggleChange =
+  /** 押されたノード自身。 */
+  | { kind: "target"; id: string; satisfied: boolean }
+  /** `requires` の遡及で達成になる前提（`via` を達成にしたから）。 */
+  | { kind: "prerequisite"; id: string; via: string }
+  /** 子と前提が全部揃ったので達成になる親。 */
+  | { kind: "contains-parent"; id: string }
+  /** 取り消しで未達成に戻る下流（`via` を戻したから）。 */
+  | { kind: "dependent"; id: string; via: string };
+
+export interface TogglePlan {
+  target: string;
+  /** 押した結果、対象がどちらになるか。 */
+  satisfied: boolean;
+  /** 対象を含む、書き換わるノード全部。押した1件だけなら長さ1。 */
+  changes: ToggleChange[];
+}
+
+/**
+ * トグルを**実行せずに**、何が書き換わるかだけ出す。
+ *
+ * 遡及カスケードは実データで一度に15件を書き換えた（2026-09-09、`生活の収入を
+ * つくる` のトグルが `Sirube を完成させる` `MVP実装完了` 等を達成にした）。
+ * 表示ではなくファイルへの書き込みなので、押し間違いの実害が違う。**自動解決が
+ * プレビューを出してから実行するのに、トグルだけ黙って書いていた**のが非対称
+ * だった——入口が違うだけで同じ「前提を埋める」が起きている。
+ *
+ * 写しの上で本物のカスケードを走らせて記録する。プレビュー専用の再実装は置かない。
+ */
+export function planToggle(g: Graph, nodeId: string, rev: ReverseIndex): TogglePlan {
+  if (!g.nodes[nodeId]) throw new Error(`node "${nodeId}" not found`);
+  // `satisfied` だけ書き換えるので、ノードは浅い写しで足りる（`requires` /
+  // `contains` の配列はカスケードが触らない）。
+  const shadow: Graph = { nodes: {} };
+  for (const [id, n] of Object.entries(g.nodes)) shadow.nodes[id] = { ...n };
+
+  const changes: ToggleChange[] = [];
+  const target = shadow.nodes[nodeId]!;
+  target.satisfied = !target.satisfied;
+  changes.push({ kind: "target", id: nodeId, satisfied: target.satisfied });
+
+  const seenIds = new Set<string>([nodeId]);
+  const log: CascadeLog = (c) => {
+    if (seenIds.has(c.id)) return; // 同じノードへ2つの理由で届いても、書き込みは1回
+    seenIds.add(c.id);
+    changes.push(c);
+  };
+
+  if (target.satisfied) {
+    cascadeSatisfyRequires(shadow, nodeId, new Set(), log);
+    cascadeSatisfyContainsParents(shadow, nodeId, rev, new Set(), log);
+  } else {
+    cascadeUnsatisfyDependents(shadow, nodeId, rev, new Set(), log);
+  }
+  return { target: nodeId, satisfied: target.satisfied, changes };
+}
+
+/** 計画をグラフへ適用し、実際に変わった id を返す（ストアが差分だけ書き戻す）。 */
+export function applyTogglePlan(g: Graph, plan: TogglePlan): string[] {
+  const changed: string[] = [];
+  for (const c of plan.changes) {
+    const node = g.nodes[c.id];
+    if (!node) continue;
+    const value = c.kind === "target" ? c.satisfied : c.kind !== "dependent";
+    if (node.satisfied === value) continue;
+    node.satisfied = value;
+    changed.push(c.id);
+  }
+  return changed;
 }
 
 /** 手動トグルの入口。達成・取り消しでカスケードの向きが変わる。
- * 変更されたノードの id 集合を返す（ストアが差分だけ書き戻すため）。 */
+ * 変更されたノードの id 集合を返す（ストアが差分だけ書き戻すため）。
+ *
+ * **計画を立てて即座に適用するだけ**にしてある。ここが独自にカスケードを
+ * 呼ぶと、プレビューで見せた内容と実際の書き込みがずれうる。 */
 export function toggleSatisfied(g: Graph, nodeId: string, rev: ReverseIndex): string[] {
-  const node = g.nodes[nodeId];
-  if (!node) throw new Error(`node "${nodeId}" not found`);
-  const before = snapshot(g);
-  node.satisfied = !node.satisfied;
-  if (node.satisfied) {
-    cascadeSatisfyRequires(g, nodeId);
-    cascadeSatisfyContainsParents(g, nodeId, rev);
-  } else {
-    cascadeUnsatisfyDependents(g, nodeId, rev);
-  }
-  return diffSatisfied(before, g);
-}
-
-function snapshot(g: Graph): Map<string, boolean> {
-  const m = new Map<string, boolean>();
-  for (const [id, n] of Object.entries(g.nodes)) m.set(id, n.satisfied);
-  return m;
-}
-
-/** `satisfied` が変わったノードの id。 */
-export function diffSatisfied(before: Map<string, boolean>, g: Graph): string[] {
-  const changed: string[] = [];
-  for (const [id, n] of Object.entries(g.nodes)) {
-    if (before.get(id) !== n.satisfied) changed.push(id);
-  }
-  return changed;
+  return applyTogglePlan(g, planToggle(g, nodeId, rev));
 }
 
 // ---------------------------------------------------------------------------
