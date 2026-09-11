@@ -7,11 +7,15 @@
 import {
   analyzeCycles,
   applyTogglePlan,
+  applyUndo,
   buildReverseIndex,
+  canUndo,
+  captureUndo,
   planToggle,
   toggleSatisfied,
   type ReverseIndex,
   type TogglePlan,
+  type ToggleUndo,
 } from "../core/engine.ts";
 import { parseBulkRequires, parseDsl, type DslParseResult } from "../core/dsl.ts";
 import { newGraph, newNode, type Graph, type Node } from "../core/model.ts";
@@ -276,9 +280,25 @@ export class MarkdownGraphStore {
     return planToggle(graph, id, buildReverseIndex(graph));
   }
 
-  /** 下見を確定させる。書くのはここだけ。 */
-  async applyToggle(graph: Graph, plan: TogglePlan): Promise<string[]> {
+  /** 下見を確定させる。書くのはここだけ。
+   *
+   *  **戻すための控えも一緒に返す**——控えは書き換える前のグラフからしか
+   *  取れないので、呼び手に「先に控えを取る」を任せると、忘れた経路だけが
+   *  静かに戻せなくなる。 */
+  async applyToggle(graph: Graph, plan: TogglePlan): Promise<{ changed: string[]; undo: ToggleUndo }> {
+    const undo = captureUndo(graph, plan);
     const changed = applyTogglePlan(graph, plan);
+    await this.persist(graph, changed);
+    return { changed, undo };
+  }
+
+  /** 直前のトグルを戻す。**カスケードは走らせない**——書いた値をそのまま
+   *  巻き戻す（もう一度押すのとは結果が違う。`ToggleUndo` 参照）。
+   *
+   *  外で1件でも書き換わっていたら、何も書かずに空を返す。 */
+  async undoToggle(graph: Graph, undo: ToggleUndo): Promise<string[]> {
+    if (!canUndo(graph, undo)) return [];
+    const changed = applyUndo(graph, undo);
     await this.persist(graph, changed);
     return changed;
   }

@@ -6,9 +6,10 @@
 // 内包まで広げると自己相似な入れ子が際限なく1画面に載る。潜るのはクリックで、
 // 入り口を変えれば違う木が現れる——地図であって複写ではない。
 
-import type { Graph, NodeState } from "../core/model.ts";
+import { isGoalColor, type Graph, type NodeState } from "../core/model.ts";
 import type { ReverseIndex } from "../core/engine.ts";
 import { descendantProgress, hasChildren, resolveState } from "../core/engine.ts";
+import { betweenKey } from "../core/goals.ts";
 import { hideFlyout, scheduleHideFlyout, showOutlineFlyout } from "./flyout.ts";
 import { consumeDragEnd, mountViewport } from "./graph-viewport.ts";
 import { mountLegend } from "./legend.ts";
@@ -51,6 +52,17 @@ function boxWidth(label: string): number {
   return Math.max(72, Math.min(240, label.length * CHAR_W + 16));
 }
 
+/** ゴール層（「もっと俯瞰」）で描くときに渡すもの。
+ *
+ * 渡された `graph` は**非ゴールを縮約した商グラフ**（`core/goals.ts`）なので、
+ * そこから状態や進捗を引くと嘘になる——間のノードが消えたぶん、前提待ちの
+ * ゴールが「今やれる」に見える。**状態は必ず `stateGraph` から引く。** */
+export interface GoalOverview {
+  stateGraph: Graph;
+  /** `betweenKey(from, to)` → 間に挟まっている非ゴールの数。 */
+  between: Map<string, number>;
+}
+
 export interface GraphViewCallbacks {
   onSelect(id: string): void;
   onDrill(id: string): void;
@@ -75,8 +87,12 @@ export function renderGraph(
   /** 右パネルが今どれを出しているか。潜らずに選ぶだけの操作があるので、
    *  グラフ側にも印が要る——押しても絵が変わらないと「効いていない」に見える。 */
   selectedId?: string,
+  /** 渡すとゴールだけの地図を描く。線の意味が1種類に畳まれる。 */
+  overview?: GoalOverview,
 ): void {
   const focus = graph.nodes[focusId];
+  // 状態と進捗の出どころ。地図では実グラフ、詳細では今のグラフそのもの。
+  const truth = overview?.stateGraph ?? graph;
   container.replaceChildren();
   if (!focus) {
     container.append(Object.assign(document.createElement("div"), { className: "empty", textContent: "ノードが見つかりません" }));
@@ -202,7 +218,7 @@ export function renderGraph(
   const totalW = contentW + PAD * 2;
 
   const centerX = PAD + contentW / 2;
-  boxes.push({ id: focusId, x: centerX - focusW / 2, y: PAD, w: focusW, state: resolveState(graph, focusId, cyclic), kind: "focus" });
+  boxes.push({ id: focusId, x: centerX - focusW / 2, y: PAD, w: focusW, state: resolveState(truth, focusId, cyclic), kind: "focus" });
 
   let y = PAD + NODE_H + GAP_Y;
   /** 折り返した各段を中央揃えで置き、使った高さを返す。 */
@@ -212,7 +228,7 @@ export function renderGraph(
       let x = PAD + (contentW - rowWidth(line)) / 2;
       for (const id of line) {
         const w = boxWidth(graph.nodes[id]!.name);
-        boxes.push({ id, x, y: rowY, w, state: resolveState(graph, id, cyclic), kind });
+        boxes.push({ id, x, y: rowY, w, state: resolveState(truth, id, cyclic), kind });
         x += w + GAP_X;
       }
       rowY += NODE_H + WRAP_GAP_Y;
@@ -260,13 +276,35 @@ export function renderGraph(
     const touchesSelection = selectedId !== undefined && (e.from === selectedId || e.to === selectedId);
     path.setAttribute(
       "class",
-      `graph-edge ${e.kind === "contains" ? "contains" : ""} ${isCyclic ? "cyclic" : ""} ${touchesSelection ? "on" : ""}`.trim(),
+      `graph-edge ${overview ? "goal" : e.kind === "contains" ? "contains" : ""} ${isCyclic ? "cyclic" : ""} ${touchesSelection ? "on" : ""}`.trim(),
     );
     // 端点を持たせておく。ホバーのたびにグラフを組み直さず、この属性を見て
     // クラスを付け替えるだけで済ませる。
     path.dataset.from = e.from;
     path.dataset.to = e.to;
     view.append(path);
+
+    if (overview) {
+      // 間に何件挟まっているか。**縮約で消えたぶんを、線の上に数で残す。**
+      // 0 のときは出さない——直に繋がっているものに `0件経由` と書くと、
+      // 何か挟まっているのに読めていないように見える。
+      const hidden = overview.between.get(betweenKey(e.from, e.to)) ?? 0;
+      if (hidden > 0) {
+        const t = document.createElementNS(svgNs, "text");
+        t.setAttribute("class", "edge-between");
+        t.setAttribute("x", String((x1 + x2) / 2));
+        t.setAttribute("y", String((y1 + y2) / 2));
+        t.setAttribute("text-anchor", "middle");
+        t.textContent = `${hidden}`;
+        const tip = document.createElementNS(svgNs, "title");
+        tip.textContent = `この2つの間に ${hidden} 件（地図では畳んでいる）`;
+        t.append(tip);
+        view.append(t);
+      }
+      // 地図では線に差し込めない。**畳んだ2つの間は隣り合っていない**ので、
+      // ここで挿すと、間のどこへ入ったのか誰にも分からないものができる。
+      continue;
+    }
 
     // 当たり判定。線は 1.5px しかないので、そのままでは掴めない。太い透明な
     // 線を重ねて、押せる幅を確保する（ノードの当たり判定に矩形を敷くのと同じ手）。
@@ -288,10 +326,14 @@ export function renderGraph(
   }
 
   // ラベル（requires / contains の区別を文字でも出す。線種だけだと分かりにくい）
-  const rows: [string, Box | undefined][] = [
-    ["これが必要（前提）", boxes.find((b) => b.kind === "requires")],
-    ["これで構成（内包）", boxes.find((b) => b.kind === "contains")],
-  ];
+  // 地図では線が1種類に畳まれている（前提と分割の区別は縮約で消える）ので、
+  // 語彙もそれに合わせて1つにする。2つ出すと、消えた区別がまだあるように読める。
+  const rows: [string, Box | undefined][] = overview
+    ? [["この先にあるゴール", boxes.find((b) => b.kind === "requires")]]
+    : [
+        ["これが必要（前提）", boxes.find((b) => b.kind === "requires")],
+        ["これで構成（内包）", boxes.find((b) => b.kind === "contains")],
+      ];
   for (const [label, sample] of rows) {
     if (!sample) continue;
     const t = document.createElementNS(svgNs, "text");
@@ -362,7 +404,7 @@ export function renderGraph(
 
     // 下に何かあるか＝弧が出るかどうか、どれだけ済んでいるか＝弧の長さ。
     // `下にN` という文字を置き換えたもの。数は title へ逃がす。
-    const below = descendantProgress(graph, b.id);
+    const below = descendantProgress(truth, b.id);
     if (below.total > 0) {
       const ringR = r * 0.58;
       const circumference = 2 * Math.PI * ringR;
@@ -401,9 +443,27 @@ export function renderGraph(
       merge.setAttribute("y", String(MARK_CY - r + 7));
       merge.textContent = String(inDeg);
       const mergeTitle = document.createElementNS(svgNs, "title");
-      mergeTitle.textContent = `${inDeg} 箇所から要求されている（片付けると ${inDeg} つ進む）`;
+      // 地図では「いくつのゴールがここを通るか」。縮約しても合流は残るので、
+      // 入次数＝優先度という読み方が上の層でもそのまま通る。
+      mergeTitle.textContent = overview
+        ? `${inDeg} つのゴールがここを通る`
+        : `${inDeg} 箇所から要求されている（片付けると ${inDeg} つ進む）`;
       merge.append(mergeTitle);
       g.append(merge);
+    }
+
+    // 付箋は地図にだけ出す。貼れるのはゴールで、ゴールが一堂に並ぶのはここ
+    // だけ——詳細のグラフに出すと、末端まで色が付いているように見える。
+    // 形は棒（印は丸）。同じ形で色だけ違うと、状態の色と意味が混ざる。
+    if (overview && isGoalColor(node.color)) {
+      const tag = document.createElementNS(svgNs, "rect");
+      tag.setAttribute("class", `map-tag map-tag-${node.color}`);
+      tag.setAttribute("x", String(cx - r - 9));
+      tag.setAttribute("y", String(MARK_CY - 6));
+      tag.setAttribute("width", "4");
+      tag.setAttribute("height", "12");
+      tag.setAttribute("rx", "2");
+      g.append(tag);
     }
 
     const label = document.createElementNS(svgNs, "text");
@@ -434,7 +494,10 @@ export function renderGraph(
     // 子があるときだけなので、条件を分けてある。
     g.addEventListener("mouseenter", () => highlightEdges(b.id));
     g.addEventListener("mouseleave", () => highlightEdges(undefined));
-    if (hasChildren(graph, b.id)) {
+    // 地図ではフライアウトを出さない。中身の一覧から潜ると**非ゴールへ飛ぶ**
+    // ので、地図にいるまま地図に無いノードが焦点になる。降りる操作は
+    // ヘッダーの切り替えに1本化してある。
+    if (!overview && hasChildren(graph, b.id)) {
       g.addEventListener("mouseenter", () => showOutlineFlyout(g, graph, b.id, cb.onDrill));
       g.addEventListener("mouseleave", scheduleHideFlyout);
     }
@@ -456,7 +519,9 @@ export function renderGraph(
   if (reqIds.length === 0 && conIds.length === 0) {
     const hint = document.createElement("div");
     hint.className = "empty";
-    hint.textContent = "このノードにはまだ下がありません。右のパネルから「前提を一括追加」で分解できます。";
+    hint.textContent = overview
+      ? "このゴールの先に、他のゴールはありません。「グラフ」に切り替えると中を分解できます。"
+      : "このノードにはまだ下がありません。右のパネルから「前提を一括追加」で分解できます。";
     container.append(hint);
   }
 }

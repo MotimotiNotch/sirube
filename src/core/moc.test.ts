@@ -76,14 +76,16 @@ describe("MOC 3層の生成", () => {
     }
   });
 
-  test("達成した目的は層1から消えて層3に出る。ノードは動かさない", () => {
+  test("達成したゴールは層3に出る。地図には残り、ノードは動かさない", () => {
     const graph = g("引っ越し -> 家, 確定申告 -> 領収書整理");
     graph.nodes["確定申告"]!.satisfied = true;
     const docs = render(graph);
-    expect(doc(docs, INDEX_DOC)).not.toContain("[[確定申告]]");
+    // 地図からは消さない（2026-09-11）。ゴールは根だけでなく中腹にも立つので、
+    // 達成したものを抜くと、その先のゴールへ続く鎖がそこで切れる。
+    expect(doc(docs, INDEX_DOC)).toContain("[[確定申告]] — 達成");
     expect(doc(docs, "90_達成済み.md")).toContain("[[確定申告]]");
-    // 層2は進行中のぶんだけ作る（達成した目的の「道」は残さない）
-    expect(docs.some((d) => d.path === `${GOALS_DIR}/確定申告.md`)).toBe(false);
+    // 道は達成したゴールにも作る。地図の行が全部リンク先を持つため。
+    expect(docs.some((d) => d.path === `${GOALS_DIR}/確定申告.md`)).toBe(true);
     // 戻し方が書いてある＝復元は satisfied を戻すだけで、移動も復元操作も無い
     expect(doc(docs, "90_達成済み.md")).toContain("`satisfied` を `false`");
   });

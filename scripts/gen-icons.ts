@@ -5,12 +5,19 @@
 // だったが、(1) 手順が暗黙で、置き忘れると壊れた icons.ts が出る (2) 取得先の絶対
 // パスに個人のユーザー名が入る (3) そもそも curl が通らない環境がある、の3つが
 // 重なっていた。fetch なら手順は1つで済む。
+//
+// **今このスクリプトは通らない**（2026-09-10 確認）。上流が `trash-2` を消して
+// `trash` に改名したので、そこで 404 で止まる。中身は同一（バイト単位で一致）
+// なので画面は壊れていない——直すなら NAMES と `icons.ts` のキー、その参照元を
+// まとめて `trash` へ寄せる。**全アイコンを取り直す操作**なので、他のアイコンの
+// 上流変更も一緒に入る。だから `undo-2` の1件はこのスクリプトを通さず、同じ
+// 正規化で手で足してある。
 
 const NAMES = [
   "compass", "search", "circle-check", "circle", "circle-slash", "repeat",
   "plus", "trash-2", "chevron-right", "x", "corner-down-right", "layers",
   "triangle-alert", "wand-sparkles", "list-checks", "pencil", "arrow-left",
-  "folder-open", "info", "sticky-note",
+  "folder-open", "info", "sticky-note", "undo-2",
 ];
 
 const SOURCE = "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons";

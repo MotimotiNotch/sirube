@@ -19,10 +19,10 @@ import {
   inDegree,
   progress,
   resolveState,
-  roots,
   type CycleInfo,
   type ReverseIndex,
 } from "./engine.ts";
+import { betweenKey, goalLayer, goalRoots, type GoalLayer } from "./goals.ts";
 import { AGENTS_DOC } from "./agents-doc.ts";
 import type { Graph, NodeState } from "./model.ts";
 
@@ -187,7 +187,7 @@ function renderIndex(
   g: Graph,
   rev: ReverseIndex,
   cycles: CycleInfo,
-  live: readonly string[],
+  layer: GoalLayer,
   goalFiles: ReadonlyMap<string, string>,
   doneCount: number,
 ): string {
@@ -195,24 +195,71 @@ function renderIndex(
   const totalActionable = Object.keys(g.nodes).filter(
     (id) => resolveState(g, id, cycles.cyclic) === "ACTIONABLE",
   ).length;
-  out.push(`進行中の目的 ${live.length} 件 ／ 今やれること ${totalActionable} 件`, "");
+  out.push(`ゴール ${layer.ids.length} 件 ／ 今やれること ${totalActionable} 件`, "");
 
-  if (live.length === 0) out.push("進行中の目的はありません。", "");
+  if (layer.ids.length === 0) {
+    out.push("まだゴールがありません。", "");
+    return out.join("\n");
+  }
 
-  for (const id of live) {
-    const p = progress(g, id);
-    out.push(`## ${nodeLink(g, id)} — ${p.done}/${p.total}${dueSuffix(g, id)}`, "");
-    const act = actionableUnder(g, id, rev, cycles.cyclic);
-    if (act.length === 0) {
-      out.push(`今やれること: なし — ${stuckReason(g, id, cycles)}`);
-    } else {
-      const head = act.slice(0, TOP_IN_INDEX).map((x) => nodeLink(g, x)).join(" ／ ");
-      const rest = act.length - TOP_IN_INDEX;
-      out.push(`今やれること: ${head}${rest > 0 ? ` ほか ${rest} 件` : ""}`);
-    }
+  // 地図。**ゴールだけを浮上させ、間のノードは件数に畳む**（2026-09-11）。
+  //
+  // 目的を1つに畳んだ実データで、入口が1行になった。かといって全ノードを
+  // 並べれば網羅に戻る。ここが出すのは「ゴールからゴールへ、間に他のゴールを
+  // 挟まない道」だけで、畳んだ数は行に残す。アプリの地図と同じ導出を使うので、
+  // 画面と入口ファイルが食い違わない。
+  out.push("## 地図", "");
+  const seen = new Set<string>();
+  const walk = (id: string, depth: number, hidden: number): void => {
+    const indent = "  ".repeat(depth);
     const file = goalFiles.get(id);
-    if (file !== undefined) out.push("", `[[${file}|→ この目的の中を見る]]`);
-    out.push("");
+    const name = g.nodes[id]?.name ?? id;
+    // 行のリンク先は**ノードではなく、そのゴールの道**（層2）。地図は縮尺の
+    // 一番上なので、押した先が1ノードのファイルだと降り口として狭すぎる。
+    // ノード本体は道の中に「この目的そのもの」として置いてある。
+    const label = file === undefined ? nodeLink(g, id) : link(file, name);
+    const via = hidden > 0 ? `（間に ${hidden} 件）` : "";
+    if (seen.has(id)) {
+      // 合流点は2度目以降を畳む。展開すると同じ枝が何度も並び、地図が
+      // 「どこかで見た行」で埋まる。合流していること自体は行に残す。
+      out.push(`${indent}- ${numberPrefix(g, id)}${label}${via} — 上に既出`);
+      return;
+    }
+    seen.add(id);
+    const p = progress(g, id);
+    const act = actionableUnder(g, id, rev, cycles.cyclic).length;
+    const state = STATE_LABEL[resolveState(g, id, cycles.cyclic)];
+    out.push(
+      `${indent}- ${numberPrefix(g, id)}${label}${via} — ${state}｜進捗 ${p.done}/${p.total}｜今やれること ${act}${dueSuffix(g, id)}`,
+    );
+    for (const child of layer.graph.nodes[id]?.requires ?? []) {
+      walk(child, depth + 1, layer.between.get(betweenKey(id, child)) ?? 0);
+    }
+  };
+  const mapRoots = goalRoots(layer).sort((a, b) => lastTouched(g, b) - lastTouched(g, a) || a.localeCompare(b));
+  for (const id of mapRoots) walk(id, 0, 0);
+  // 輪の中にいて、どの根からも辿り着けないゴール。**落とさない**——
+  // 地図から消えると、詰まっているものほど見えなくなる。
+  const stranded = layer.ids.filter((id) => !seen.has(id));
+  if (stranded.length > 0) {
+    out.push("", "どの根からも辿り着けないゴール（輪の中にいます）:", "");
+    for (const id of stranded) walk(id, 0, 0);
+  }
+  out.push("");
+
+  // 名前で「今やれること」を出すのは一番上のゴール1つだけ。地図は行数が増える
+  // ので、ここで全ゴールぶん並べると結局また網羅に戻る（残りは各ゴールの道へ）。
+  const head = mapRoots[0];
+  if (head !== undefined) {
+    const act = actionableUnder(g, head, rev, cycles.cyclic);
+    out.push(`## ${nodeLink(g, head)} の今やれること`, "");
+    if (act.length === 0) {
+      out.push(stuckReason(g, head, cycles), "");
+    } else {
+      const names = act.slice(0, TOP_IN_INDEX).map((x) => nodeLink(g, x)).join(" ／ ");
+      const rest = act.length - TOP_IN_INDEX;
+      out.push(`${names}${rest > 0 ? ` ほか ${rest} 件` : ""}`, "");
+    }
   }
 
   if (cycles.cycles.length > 0) {
@@ -312,21 +359,22 @@ function renderDone(g: Graph, done: readonly string[]): string {
 
 /** 3層すべてを組み立てる。ファイルには書かない（書くのはストアの仕事）。 */
 export function renderMocs(g: Graph, rev: ReverseIndex, cycles: CycleInfo): GeneratedDoc[] {
-  const all = roots(g, rev);
-  const live = all.filter((id) => !g.nodes[id]!.satisfied);
-  const done = all.filter((id) => g.nodes[id]!.satisfied);
-  live.sort((a, b) => lastTouched(g, b) - lastTouched(g, a) || a.localeCompare(b));
+  const layer = goalLayer(g, rev);
+  const done = layer.ids.filter((id) => g.nodes[id]!.satisfied);
+  // **道は達成済みのゴールにも作る。** 地図には達成したゴールも載る（間にいると
+  // 鎖が切れるため）ので、リンク先の無い行があってはいけない。
+  const ordered = [...layer.ids].sort((a, b) => lastTouched(g, b) - lastTouched(g, a) || a.localeCompare(b));
 
   const taken = new Set<string>();
   const goalFiles = new Map<string, string>();
-  for (const id of live) goalFiles.set(id, goalFileName(g.nodes[id]!.name, taken));
+  for (const id of ordered) goalFiles.set(id, goalFileName(g.nodes[id]!.name, taken));
 
   const docs: GeneratedDoc[] = [
-    { path: INDEX_DOC, content: renderIndex(g, rev, cycles, live, goalFiles, done.length) },
+    { path: INDEX_DOC, content: renderIndex(g, rev, cycles, layer, goalFiles, done.length) },
     { path: DONE_DOC, content: renderDone(g, done) },
     { path: AGENTS_DOC_PATH, content: `${AGENTS_BANNER}\n\n${AGENTS_DOC}` },
   ];
-  for (const id of live) {
+  for (const id of ordered) {
     docs.push({ path: `${GOALS_DIR}/${goalFiles.get(id)!}.md`, content: renderGoal(g, rev, cycles, id) });
   }
   return docs;

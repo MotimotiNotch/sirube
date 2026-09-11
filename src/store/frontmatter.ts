@@ -99,6 +99,7 @@ export function parseNodeFile(id: string, text: string, mtimeMs: number): ParseN
           requires: asStringArray(loose?.requires),
           contains: asStringArray(loose?.contains),
           number: Number.isInteger(loose?.number) && (loose?.number as number) > 0 ? (loose?.number as number) : undefined,
+          goal: loose?.goal === true ? true : undefined,
           due: typeof loose?.due === "string" ? loose.due : undefined,
           color: typeof loose?.color === "string" ? loose.color : undefined,
         };
@@ -112,6 +113,9 @@ export function parseNodeFile(id: string, text: string, mtimeMs: number): ParseN
   node.requires = dedupe(fm.requires);
   node.contains = dedupe(fm.contains);
   if (fm.number !== undefined) node.number = fm.number;
+  // `goal: false` は書かれていないのと同じに畳む。値を持っていると「宣言した
+  // 結果ゴールでない」ように読めるが、入次数0なら書いてあってもゴールになる。
+  if (fm.goal === true) node.goal = true;
   if (fm.due !== undefined) node.due = fm.due;
   if (fm.color !== undefined) node.color = fm.color;
   node.note = body;
@@ -155,6 +159,9 @@ export function serializeNodeFile(node: Node, nameOf?: (id: string) => string | 
   if (node.name !== node.id) fm.name = node.name;
   // 番号は名前の次。人が最初に読む2つを上に固めておく。
   if (node.number !== undefined) fm.number = node.number;
+  // ゴール宣言は名前・番号の次。人が最初に読む位置に置く（入口に出るかどうかを
+  // 決める1行なので、`requires` の下に埋もれると見落とす）。真のときだけ書く。
+  if (node.goal === true) fm.goal = true;
   fm.satisfied = node.satisfied;
   fm.requires = node.requires;
   fm.contains = node.contains;

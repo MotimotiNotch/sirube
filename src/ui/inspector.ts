@@ -4,6 +4,7 @@
 // 分解こそがこのツールで人間にしかできないことなので、常に手の届く位置に置く。
 
 import { inDegree, progress, resolveState, type ReverseIndex } from "../core/engine.ts";
+import { isGoal } from "../core/goals.ts";
 import { GOAL_COLORS, isGoalColor, type GoalColor, type Graph, type NodeState } from "../core/model.ts";
 import { COLOR_LABEL, h, iconSpan, stateBadge, stateDot } from "./dom.ts";
 
@@ -22,6 +23,8 @@ export interface InspectorCallbacks {
   onDelete(id: string): void;
   /** 付箋の色を貼る／外す（`undefined` で外す）。 */
   onColor(id: string, color: GoalColor | undefined): void;
+  /** ゴールとして浮上させる／やめる。 */
+  onGoal(id: string, on: boolean): void;
   /** `parentId` から選択中のノードへの繋がりだけを切る（ノードは残す）。 */
   onDetach(parentId: string, childId: string): void;
 }
@@ -122,15 +125,52 @@ export function renderInspector(
     container.append(warn);
   }
 
-  // 付箋。**目的（入次数0）にだけ貼れる。**
+  // ゴール宣言。**中腹を地図へ浮上させる1ビット**（2026-09-11）。
+  //
+  // 実データで目的が1つに畳まれ、64ノードが根から11段下までぶら下がった。
+  // 「それ全部を1つの目的に入れると、深いところが遠くなってカオスマップになる」
+  // （のっち）。かといって切り離すと、何のためにあったのかが消える。**位置は
+  // そのままで、入口としても扱う**ためにここで指す。
+  {
+    // 誰からも要求されていないノードは、書かなくてもゴール。ここで外させない
+    // ——外しても次の読み込みでまたゴールに戻るので、効かないボタンになる。
+    const auto = inDegree(selectedId, rev) === 0;
+    const sec = h("div", { class: "insp-section" });
+    const head = h("h4");
+    head.append(iconSpan("compass", 12), "ゴール");
+    sec.append(head);
+    if (auto) {
+      sec.append(h("p", { class: "insp-note" }, ["どこからも要求されていないので、自動でゴールです。"]));
+    } else {
+      const on = node.goal === true;
+      const btn = h("button", { class: `btn${on ? " primary" : ""}`, type: "button", "aria-pressed": on ? "true" : "false" });
+      btn.append(iconSpan("compass", 14), on ? "ゴールをやめる" : "ゴールにする");
+      btn.addEventListener("click", () => cb.onGoal(selectedId, !on));
+      sec.append(btn);
+      sec.append(
+        h("p", { class: "insp-note" }, [
+          on
+            ? "地図に出ます。ここまでの道は畳まれ、間の件数だけが線に残ります。"
+            : "地図に出したいときに押します。構造は変わりません（状態も進捗もそのまま）。",
+        ]),
+      );
+    }
+    container.append(sec);
+  }
+
+  // 付箋。**ゴールにだけ貼れる。**
   //
   // 末端まで貼れるようにすると、それは model.ts の原則4 が禁じているタグその
   // ものになる。原則が代替として挙げる「優先度＝合流点の入次数」「分類＝エッジ」
-  // は目的には効かない（目的同士に依存関係は無く、入次数は全部0）ので、
-  // そこだけを例外として開けている。
+  // はゴールには効かない（ゴール同士を結ぶのは縮約した線で、そこにタグの
+  // 代わりは無い）ので、そこだけを例外として開けている。
+  //
+  // 判定を入次数0から `isGoal` へ広げた（2026-09-11）。目的が1本に畳まれた
+  // 瞬間、貼れる先が2件に減って**機能ごと死んでいた**。宣言したゴールにも
+  // 貼れれば元の用途（この2つは同じ話／今期はこれ）に戻る。
   //
   // 色に序列は付けない。同じ色を2つの目的に貼れば、それがそのまま括りになる。
-  if (inDegree(selectedId, rev) === 0) {
+  if (isGoal(graph, selectedId, rev)) {
     const sec = h("div", { class: "insp-section" });
     const head = h("h4");
     head.append(iconSpan("stickyNote", 12), "付箋");

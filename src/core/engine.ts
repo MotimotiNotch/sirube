@@ -417,16 +417,80 @@ export function planToggle(g: Graph, nodeId: string, rev: ReverseIndex): ToggleP
   return { target: nodeId, satisfied: target.satisfied, changes };
 }
 
+/** その変更が書き込む値。押したノードは計画の向き、それ以外は理由で決まる
+ *  （前提と親は達成、下流は取り消し）。**書き込みと控えで同じ規則を使う**——
+ *  2箇所に書くと、戻す値だけがずれても誰も気付けない。 */
+function valueOf(c: ToggleChange): boolean {
+  return c.kind === "target" ? c.satisfied : c.kind !== "dependent";
+}
+
 /** 計画をグラフへ適用し、実際に変わった id を返す（ストアが差分だけ書き戻す）。 */
 export function applyTogglePlan(g: Graph, plan: TogglePlan): string[] {
   const changed: string[] = [];
   for (const c of plan.changes) {
     const node = g.nodes[c.id];
     if (!node) continue;
-    const value = c.kind === "target" ? c.satisfied : c.kind !== "dependent";
+    const value = valueOf(c);
     if (node.satisfied === value) continue;
     node.satisfied = value;
     changed.push(c.id);
+  }
+  return changed;
+}
+
+/**
+ * 直前のトグルを戻すための控え。**カスケードの逆再生ではなく、書いた値の巻き戻し。**
+ *
+ * もう一度押しても戻らない。往路（達成）は `requires` を遡って前提を埋め、
+ * 復路（取り消し）は下流を戻す——**向きが違う**ので、同じノードを2回押すと
+ * 埋まった前提はそのまま残り、代わりに別のノードが未達に落ちる。押す前とは
+ * 違う状態になる。「間違えて押してもすぐ戻せる」は成り立っていなかった
+ * （`DOUBLE_TAP_GUARD_MS` を達成のトグルに掛けなかった根拠がこれで、
+ * カスケードが入った時点で崩れていた）。
+ *
+ * だから戻すのは記録からで、ここではカスケードを一切走らせない。
+ */
+export interface ToggleUndo {
+  /** 何を押した結果か。文言に使うだけで、戻す処理には要らない。 */
+  target: string;
+  /** 書き換えたノードと、その前後の値。 */
+  entries: { id: string; before: boolean; after: boolean }[];
+}
+
+/** 控えを取る。**適用する前**のグラフから読むので、`applyTogglePlan` と対で
+ *  呼ぶ（ストアの `applyToggle` が両方を持っている）。 */
+export function captureUndo(g: Graph, plan: TogglePlan): ToggleUndo {
+  const entries: ToggleUndo["entries"] = [];
+  for (const c of plan.changes) {
+    const node = g.nodes[c.id];
+    if (!node) continue;
+    const after = valueOf(c);
+    if (node.satisfied === after) continue; // 動かないものは戻す対象でもない
+    entries.push({ id: c.id, before: node.satisfied, after });
+  }
+  return { target: plan.target, entries };
+}
+
+/**
+ * まだ戻せるか。**書いたときの値がそのまま残っているものだけ**を戻す。
+ *
+ * 間に外（Obsidian / AI / git のマージ）が触っていたら、巻き戻しは他人の
+ * 書き込みを消す操作になる。1件でも食い違ったら諦める——部分的に戻すと、
+ * 何が戻って何が残ったのかが画面のどこにも出ない。
+ */
+export function canUndo(g: Graph, undo: ToggleUndo): boolean {
+  if (undo.entries.length === 0) return false;
+  return undo.entries.every((e) => g.nodes[e.id]?.satisfied === e.after);
+}
+
+/** 控えを戻し、変わった id を返す。 */
+export function applyUndo(g: Graph, undo: ToggleUndo): string[] {
+  const changed: string[] = [];
+  for (const e of undo.entries) {
+    const node = g.nodes[e.id];
+    if (!node || node.satisfied !== e.after) continue;
+    node.satisfied = e.before;
+    changed.push(e.id);
   }
   return changed;
 }

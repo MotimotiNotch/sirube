@@ -340,6 +340,78 @@ describe("ドリルダウンとインスペクタ", () => {
     expect(text("inspector")).toContain("達成にする"); // 確定申告は動いていない
   });
 
+  test("連動して書いたあとは「戻す」が出て、押すと全部戻る", async () => {
+    // もう一度押しても元には戻らない（往路と復路で向きが違う）。押し間違いを
+    // 引き受けられるのはこのボタンだけ。
+    expect($("undo-btn").classList.contains("hidden")).toBe(true);
+
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    findButton("inspector", "達成にする")!.click();
+    await tick();
+    findButton("modal", "達成にする")!.click();
+    await tick();
+
+    expect($("undo-btn").classList.contains("hidden")).toBe(false);
+    expect(text("toast-stack")).toContain("戻す");
+    $("nav-actionable").click();
+    await tick();
+    expect(text("center-body")).not.toContain("領収書整理");
+
+    $("undo-btn").click();
+    await tick();
+
+    // 押した本人も、連動して埋まった前提も、押す前の状態へ戻る。
+    expect($("undo-btn").classList.contains("hidden")).toBe(true);
+    expect(text("center-body")).toContain("領収書整理");
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    expect(text("inspector")).toContain("達成にする");
+  });
+
+  test("外でファイルが変わっていたら戻さない", async () => {
+    const fs = sampleFs();
+    document.body.innerHTML = HTML;
+    const app = await startApp(fs);
+
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    findButton("inspector", "達成にする")!.click();
+    await tick();
+    findButton("modal", "達成にする")!.click();
+    await tick();
+    expect($("undo-btn").classList.contains("hidden")).toBe(false);
+
+    // 連動で達成にした前提を、外（Obsidian / AI）が未達へ戻した。
+    const entry = Array.from(fs.files.entries()).find(([, f]) => f.content.includes("name: 領収書整理"))!;
+    fs.files.set(entry[0], { content: entry[1].content.replace("satisfied: true", "satisfied: false"), mtimeMs: fs.tick() });
+    await app.reload();
+
+    $("undo-btn").click();
+    await tick();
+    expect(text("toast-stack")).toContain("戻せません");
+    // 巻き戻しは他人の書き込みを消す操作になるので、丸ごと諦める。
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    expect(text("inspector")).toContain("達成を取り消す");
+  });
+
+  test("1件で済んだトグルでは「戻す」を出さない（押し直せば戻るため）", async () => {
+    findButton("center-body", "領収書整理")!.click();
+    await tick();
+    findButton("inspector", "達成にする")!.click();
+    await tick();
+    expect($("undo-btn").classList.contains("hidden")).toBe(true);
+  });
+
+  test("下見はキャンセル側にフォーカスを置く（勢いの Enter で書かない）", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    findButton("inspector", "達成にする")!.click();
+    await tick();
+    expect(document.activeElement?.textContent).toBe("キャンセル");
+  });
+
   test("連動先が無いトグルは下見を挟まない", async () => {
     // 末端（前提を持たない）を潰すのは一番よくある操作。ここで毎回ダイアログが
     // 出ると、確認そのものが読み飛ばされる合図になる。
@@ -1608,5 +1680,126 @@ describe("グラフのノードを押したとき", () => {
     await clickNode("MVP実装完了");
     expect(text("breadcrumb")).toContain("MVP実装完了");
     expect($("center-body").querySelector("svg")).toBeTruthy();
+  });
+});
+
+describe("ゴールの地図（もっと俯瞰）", () => {
+  const crumb = (): string => text("breadcrumb");
+  const toggle = (label: string): HTMLButtonElement =>
+    Array.from($("breadcrumb").querySelectorAll("button")).find((b) => b.textContent === label) as HTMLButtonElement;
+  const mapLabels = (): string[] =>
+    Array.from($("center-body").querySelectorAll(".graph-node .label")).map((t) => t.textContent ?? "");
+  /** パンくずの切り替えは2打目を 400ms 飲む（同じ位置に逆向きのボタンが出るため）。
+   *  往復を試すテストは、その窓を跨いでから押す。 */
+  const pastGuard = (): Promise<void> => new Promise((r) => setTimeout(r, 420));
+
+  /** `Tauriシェル` をゴールに立てる。`Sirube をリリースする` からは
+   *  `MVP実装完了` を1つ挟んだ先にいるので、畳んだ件数の検査にも使える。 */
+  const declareTauriGoal = async (): Promise<void> => {
+    const input = $("search-input") as HTMLInputElement;
+    input.value = "Tauriシェル";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    const row = Array.from($("center-body").querySelectorAll(".hit-main")).find((b) =>
+      (b.textContent ?? "").includes("Tauriシェル"),
+    ) as HTMLButtonElement;
+    row.click();
+    await tick();
+    findButton("inspector", "ゴールにする")!.click();
+    await tick();
+  };
+
+  test("入次数0のノードは自動でゴール。宣言のボタンは出さない", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    expect(text("inspector")).toContain("自動でゴールです");
+    expect(findButton("inspector", "ゴールにする")).toBeUndefined();
+  });
+
+  test("地図へ上がると、今いる場所を包む一番近いゴールが中心になる", async () => {
+    // 根から出し直さない。深いところで作業していた人が上がるたびに全体図を
+    // 見せられると、自分がどこに居たのか分からなくなる。
+    await declareTauriGoal();
+    toggle("地図").click();
+    await tick();
+    // 立てた本人がゴールなので、その場で中心になる
+    expect(crumb()).toContain("Tauriシェル");
+    expect($("breadcrumb").querySelector(".crumb-layer")).toBeTruthy();
+  });
+
+  test("「地図」でゴールだけになり、間に畳んだ件数が線に出る", async () => {
+    await declareTauriGoal();
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    toggle("地図").click();
+    await tick();
+
+    // 中心は、今いた場所を包む一番近いゴール
+    expect(crumb()).toContain("地図");
+    expect(crumb()).toContain("Sirube をリリースする");
+    const labels = mapLabels();
+    expect(labels).toContain("Tauriシェル");
+    // 間のノードは畳まれている
+    expect(labels).not.toContain("MVP実装完了");
+    // 畳んだ数は線に残る（MVP実装完了 の1件）
+    // `<title>` を内側に持つので textContent は数字＋説明になる。数字が頭に来る。
+    const counts = Array.from($("center-body").querySelectorAll(".edge-between")).map((t) => t.textContent ?? "");
+    expect(counts.some((c) => c.startsWith("1"))).toBe(true);
+    expect(counts.some((c) => c.includes("間に 1 件"))).toBe(true);
+  });
+
+  test("地図の状態は実グラフから引く（畳んだ前提を消さない）", async () => {
+    // `Tauriシェル` は `Rustツールチェーンを入れる` 待ちで BLOCKED。商グラフの
+    // 上で状態を導くと前提ごと畳まれて ACTIONABLE に見える——**そうなっていない**
+    // ことを見る。`core/goals.test.ts` に、同じ食い違いの陽性対照がある。
+    await declareTauriGoal();
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    toggle("地図").click();
+    await tick();
+    const node = Array.from($("center-body").querySelectorAll(".graph-node")).find((n) =>
+      (n.textContent ?? "").includes("Tauriシェル"),
+    )!;
+    expect(node.classList.contains("st-BLOCKED")).toBe(true);
+  });
+
+  test("「グラフ」で元の縮尺へ戻る", async () => {
+    await declareTauriGoal();
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    toggle("地図").click();
+    await tick();
+    await pastGuard();
+    toggle("グラフ").click();
+    await tick();
+    // 札が消える（ボタンの「地図」は詳細でも出ているので、札で見る）
+    expect($("breadcrumb").querySelector(".crumb-layer")).toBeNull();
+    expect(mapLabels()).toContain("MVP実装完了");
+  });
+
+  test("地図では俯瞰を出さない（同じ場所で往復する切り替えにする）", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    toggle("地図").click();
+    await tick();
+    expect(toggle("俯瞰")).toBeUndefined();
+    expect(toggle("グラフ")).toBeTruthy();
+  });
+
+  test("サイドバーから目的を選び直すと詳細の縮尺に戻る", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    toggle("地図").click();
+    await tick();
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    expect($("breadcrumb").querySelector(".crumb-layer")).toBeNull();
+    expect(mapLabels()).toContain("領収書整理");
+  });
+
+  test("付箋はゴールに貼れる（目的が1本に畳まれても死なない）", async () => {
+    await declareTauriGoal();
+    // 宣言したゴールにも付箋の列が出る。以前は入次数0だけが対象だった。
+    expect($("inspector").querySelectorAll(".swatch").length).toBeGreaterThan(0);
   });
 });

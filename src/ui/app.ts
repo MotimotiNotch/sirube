@@ -3,8 +3,9 @@
 // サーバは無い。ストアもエンジンもここ（フロント）で動き、ファイルアクセスだけ
 // `SirubeFs` の実装を差し替える（開発中はメモリ、Tauri ではプラグイン fs）。
 
-import { analyzeCycles, buildReverseIndex, hasChildren, progress, resolveState, roots, type CycleInfo, type ReverseIndex, type TogglePlan } from "../core/engine.ts";
+import { analyzeCycles, buildReverseIndex, canUndo, hasChildren, progress, resolveState, roots, type CycleInfo, type ReverseIndex, type TogglePlan, type ToggleUndo } from "../core/engine.ts";
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
+import { enclosingGoal, goalLayer, goalRoots, type GoalLayer } from "../core/goals.ts";
 import { parseDsl } from "../core/dsl.ts";
 import { normalizeForDuplicateCheck, planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
 import { countActionable, nextActions, pathFromRoot, search } from "../core/search.ts";
@@ -24,6 +25,16 @@ interface AppState {
    *  ここで1つ持って検索・グラフ・インスペクタへ配る。 */
   cycles: CycleInfo;
   mode: "list" | "graph";
+  /** グラフを「ゴールだけの地図」で描くか（2026-09-11）。
+   *
+   * 画面を4つ目に増やさず、Chain View の**縮尺**として持つ。引くと非ゴールが
+   * 消えてゴールだけが残り、寄ると元のグラフに戻る。一覧（俯瞰）ではなく
+   * グラフ側に置いたのは、地図がノードと線でできているため——語彙（印・状態色・
+   * 弧・パンくず）をそのまま使い回せる。 */
+  layer: "detail" | "goals";
+  /** ゴール層の商グラフ。**描画専用**（`core/goals.ts` の警告を参照）。
+   *  毎描画で組み直さない——全ゴールから幅優先で下るので `recompute` で1回。 */
+  goals: GoalLayer;
   focusId?: string;
   selectedId?: string;
   query: string;
@@ -73,8 +84,12 @@ export interface AppHandle {
  * 操作を邪魔しないようにしてある。
  *
  * **達成のトグルには掛けない。** あちらは同じ位置でラベルが入れ替わる点は同じ
- * だが、2打目にも意味がある（間違えて押したものをすぐ戻す）。飲んでよいのは
+ * だが、2打目にも意味がある（押し過ぎたぶんを引き返す）。飲んでよいのは
  * 「2打目に意味が無い」ものだけ。
+ *
+ * ただし**2打目は「元に戻す」ではない**。カスケードは往路と復路で向きが違い、
+ * 2回押すと押す前と別の状態になる（`ToggleUndo`）。取り消しはヘッダーの
+ * 「戻す」が担当で、こちらは押した本人が向きを選び直す操作でしかない。
  */
 const DOUBLE_TAP_GUARD_MS = 400;
 
@@ -106,6 +121,9 @@ const PLACE_KEY = "sirube.place";
  *  なる。選択（`selectedId`）も持たない。焦点と俯瞰先から導ける。 */
 interface SavedPlace {
   mode: "list" | "graph";
+  /** 地図で見ていたなら `"goals"`。縮尺は「どこを見ていたか」の一部——
+   *  地図で閉じたのにグラフで開き直すと、前回の続きに見えない。 */
+  layer?: "detail" | "goals";
   focusId?: string;
   trail: string[];
   scopeId?: string;
@@ -114,6 +132,7 @@ interface SavedPlace {
 function savePlace(state: AppState): void {
   const place: SavedPlace = {
     mode: state.mode,
+    layer: state.layer,
     ...(state.focusId ? { focusId: state.focusId } : {}),
     trail: state.trail,
     ...(state.scopeId ? { scopeId: state.scopeId } : {}),
@@ -149,6 +168,10 @@ function restorePlace(state: AppState): void {
 
   if (saved.mode === "graph" && alive(saved.focusId)) {
     state.mode = "graph";
+    // 縮尺は焦点が地図に載っているときだけ戻す。ゴールでなくなっていたら
+    // （宣言を外した・親が付いた）詳細で開く——地図に無いものを中心に据えると
+    // 「ノードが見つかりません」になる。
+    if (saved.layer === "goals" && state.goals.graph.nodes[saved.focusId]) state.layer = "goals";
     state.focusId = saved.focusId;
     // グラフに立つときは必ず何かを選んでいる（潜る操作が両方を同時に置く）。
     // 復元でもそれを崩さない。崩すと、詳細パネルだけ空のグラフ画面ができる。
@@ -184,6 +207,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     rev: buildReverseIndex(graph),
     cycles: analyzeCycles(graph),
     mode: "list",
+    layer: "detail",
+    goals: goalLayer(graph, buildReverseIndex(graph)),
     query: "",
     trail: [],
     issues,
@@ -207,6 +232,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
 
   const recompute = (): void => {
     state.rev = buildReverseIndex(state.graph);
+    state.goals = goalLayer(state.graph, state.rev);
     state.cycles = analyzeCycles(state.graph);
     state.plan = planReconcile(state.graph);
     syncMocs();
@@ -239,6 +265,33 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   const newRootBtn = el<HTMLButtonElement>("new-root-btn");
   newRootBtn.append(iconSpan("plus", 15));
   newRootBtn.addEventListener("click", () => openAdd());
+
+  /**
+   * 直前のトグルを戻すボタン。**連動が起きたときだけ出す。**
+   *
+   * もう一度押しても戻らないのが理由（`ToggleUndo`）。押した1件だけで済んだ
+   * トグルは押し直せば本当に元へ戻るので、そこにボタンを出すと「戻す手段が
+   * 2つある」だけになる。**出ていること自体が「押し直しでは戻らない書き込みが
+   * 起きた」の合図**で、自動解決ボタンの出し入れと同じ考え方。
+   *
+   * トーストに寄せなかったのは、3.2秒で消えるから——`issues` を自動解決へ
+   * 移した理由（2026-09-02）と同じ。「あ、違う」と気付くのは、たいてい画面が
+   * 描き直されて一覧が変わったのを見た後になる。
+   */
+  const undoBtn = el<HTMLButtonElement>("undo-btn");
+  undoBtn.append(iconSpan("undo2", 14), document.createTextNode("戻す"));
+  undoBtn.addEventListener("click", () => void undoLast());
+
+  const renderUndoBtn = (): void => {
+    undoBtn.classList.toggle("hidden", !lastUndo);
+    if (!lastUndo) {
+      undoBtn.removeAttribute("title");
+      return;
+    }
+    const target = lastUndo.entries.find((e) => e.id === lastUndo!.target);
+    const dir = target?.after === false ? "取り消し" : "達成";
+    undoBtn.title = `「${nameOf(lastUndo.target)}」の${dir}を戻す（${lastUndo.entries.length}件）`;
+  };
 
   const reconcileBtn = el<HTMLButtonElement>("reconcile-btn");
   reconcileBtn.replaceChildren(iconSpan("wandSparkles", 14), document.createTextNode("自動解決"));
@@ -284,6 +337,46 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     render();
   };
 
+  /**
+   * 地図へ上がる（「もっと俯瞰」）。**今いる場所を包む一番近いゴールが中心**になる。
+   *
+   * 位置を捨てないのが肝。地図をいつも根から出すと、深いところで作業していた人が
+   * 上がるたびに迷子の逆——自分がどこに居たのか分からない全体図——を見ることになる。
+   */
+  const goMap = (): void => {
+    const here = state.focusId;
+    const target =
+      (here === undefined ? undefined : enclosingGoal(state.graph, here, state.rev)) ??
+      goalRoots(state.goals)[0] ??
+      state.goals.ids[0];
+    if (target === undefined) {
+      toast("ゴールがまだありません");
+      return;
+    }
+    // 縮尺が変わる＝別の絵になるので、拡大率と位置は初期に戻す。
+    resetViewport();
+    state.layer = "goals";
+    state.mode = "graph";
+    // 経路は積み直す。地図の道と詳細の道は段の数が違うので、混ぜると
+    // パンくずが実際には通っていない場所を指す。
+    state.trail = [];
+    state.focusId = target;
+    state.selectedId = target;
+    render();
+  };
+
+  /** 地図から降りる。中心にしていたゴールが、そのままグラフの中心になる。 */
+  const goDetail = (): void => {
+    const here = state.focusId;
+    state.layer = "detail";
+    if (here === undefined) {
+      state.mode = "list";
+      render();
+      return;
+    }
+    focusFresh(here);
+  };
+
   const focusFresh = (id: string): void => {
     // 入口が3つ（サイドバーの目的・一覧の行・インスペクタの上向きリンク）ある
     // ので、`drill` と同じ番人をここにも置く。今はどの経路も実在するノードしか
@@ -292,6 +385,9 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     // 「この目的から見直す」入口なので、拡大率と位置も初期に戻す。潜って移った
     // ときと違い、ここは同じノードを選び直すことがある。
     resetViewport();
+    // 入口から入るときは必ず詳細の縮尺。地図から目的を選んだのに地図のままだと、
+    // 押したのに同じ絵が出たように見える。
+    state.layer = "detail";
     // 目的からの経路をパンくずに積む。一覧から飛ぶと、**それが目的の中のどこ
     // なのか画面のどこにも出ていなかった**（のっち報告 2026-09-03）。目的そのもの
     // を押したときは経路が空なので、これまでどおり1段だけになる。
@@ -321,6 +417,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       return;
     }
     resetViewport();
+    state.layer = "detail";
     state.trail = path.slice(0, -1);
     state.focusId = parent;
     state.selectedId = id;
@@ -381,6 +478,10 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
 
   const goList = (scopeId?: string): void => {
     state.mode = "list";
+    // 一覧は実グラフの話しかしない（俯瞰も検索も非ゴールを数える）ので、
+    // 地図の縮尺を持ち込まない。持ち込むと、戻ったときに地図へ載っていない
+    // ノードが地図の中心に据えられる。
+    state.layer = "detail";
     state.scopeId = scopeId;
     // TOP へ戻るときは選択も手放す。一覧は「どれをやるか選ぶ」画面で、選択中の
     // 印すら出さない——前の選択を抱えたままだと、画面のどこにも対応する相手が
@@ -426,6 +527,34 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     openTogglePreview(plan);
   };
 
+  /** 直前のトグルの控え。**1手だけ**持つ（履歴は持たない——2手前まで戻せると、
+   *  どこまで戻ったかを画面に出す責任が生まれる。ここで守りたいのは「今の1回が
+   *  間違いだった」であって、作業履歴ではない）。 */
+  let lastUndo: ToggleUndo | undefined;
+
+  /**
+   * 直前のトグルを戻す。**カスケードは走らせず、書いた値をそのまま巻き戻す。**
+   *
+   * 外（Obsidian / AI / git）が1件でも触っていたら戻さない。巻き戻しは
+   * 「自分が書いた値を消す」操作なので、他人の書き込みまで消すと取り返しが
+   * つかない。
+   */
+  const undoLast = async (): Promise<void> => {
+    const undo = lastUndo;
+    if (!undo) return;
+    if (!canUndo(state.graph, undo)) {
+      lastUndo = undefined;
+      render();
+      toast("ファイルが外で変わったので、この分は戻せません");
+      return;
+    }
+    const changed = await store.undoToggle(state.graph, undo);
+    lastUndo = undefined;
+    recompute();
+    render();
+    toast(`${changed.length} 件を戻しました`);
+  };
+
   const applyToggle = async (plan: TogglePlan): Promise<void> => {
     // 下見を出している間に、外からファイルが書き換わることがある（Tauri は
     // `watchNodes` で読み直してグラフを差し替える）。**古くなった計画は書かない**
@@ -438,10 +567,12 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       toast("ファイルが外で変わったので、もう一度押してください");
       return;
     }
-    const changed = await store.applyToggle(state.graph, plan);
+    const { changed, undo } = await store.applyToggle(state.graph, plan);
+    // 連動したときだけ控えを残す。1件で済んだトグルは押し直せば元へ戻る。
+    lastUndo = changed.length > 1 ? undo : undefined;
     recompute();
     render();
-    if (changed.length > 1) toast(`${changed.length} 件が連動して変わりました`);
+    if (changed.length > 1) toast(`${changed.length} 件が連動して変わりました（ヘッダーの「戻す」で元に戻せます）`);
   };
 
   /** 付箋を貼る／外す。トーストは出さない——色は押した瞬間に画面へ出るので、
@@ -453,6 +584,23 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     else node.color = color;
     await store.persist(state.graph, [id]);
     render();
+  };
+
+  /**
+   * ゴール宣言を立てる／外す。**地図の顔ぶれが変わるので `recompute` を通す。**
+   *
+   * 付箋（`setColor`）と違って商グラフを組み直す必要がある——1件立てただけで、
+   * その上下の線が全部引き直しになる（間のノードがどこまで畳まれるかが変わる）。
+   */
+  const setGoal = async (id: string, on: boolean): Promise<void> => {
+    const node = state.graph.nodes[id];
+    if (!node) return;
+    if (on) node.goal = true;
+    else delete node.goal;
+    await store.persist(state.graph, [id]);
+    recompute();
+    render();
+    toast(on ? `「${nameOf(id)}」を地図に出しました` : `「${nameOf(id)}」を地図から外しました`);
   };
 
   /** 親から選択中のノードへの繋がりを切る。ノードは残る。 */
@@ -987,6 +1135,10 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     actions.append(cancel, ok);
     modal.append(actions);
     openModal();
+    // **キャンセル側に置く。** 他のモーダルは入力欄へ寄せているが、ここには
+    // 入力が無い。実行側へ置くと、開いた勢いの Enter がそのまま書き込みになり、
+    // 確認を挟んだ意味が消える。Escape でも閉じる（どちらもキャンセル）。
+    cancel.focus();
   };
 
   /** 自動解決。宣言して実行し、残りを報告する。 */
@@ -1218,13 +1370,27 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     appendTrail();
     if (state.focusId) {
       appendSep();
-      bar.append(h("span", { class: "current" }, [state.graph.nodes[state.focusId]?.name ?? state.focusId]));
+      const current = h("span", { class: "current" }, []);
+      // 縮尺を文字で言う。押せるものが「グラフ」しか無い状態からでも推測は
+      // できるが、半年ぶりに開いた人には推測させない。
+      if (state.layer === "goals") current.append(h("span", { class: "crumb-layer" }, ["地図"]));
+      current.append(document.createTextNode(state.graph.nodes[state.focusId]?.name ?? state.focusId));
+      bar.append(current);
+    }
+    const focusId = state.focusId;
+    if (state.layer === "goals") {
+      // 地図では俯瞰を出さない。**同じ場所で往復する**のがこの切り替えの決まりで、
+      // 地図 →俯瞰 →グラフ と渡ると、押した覚えのない縮尺に降りている。
+      appendToggle("グラフ", () => goDetail());
+      return;
     }
     // 今いる地点の配下を俯瞰する。目的で押せば目的の配下、潜った先で押せば
     // その枝の配下——グラフが「1クリック1階層」なのに対して、こちらは
     // 今いる場所から下を一息に見る。
-    const focusId = state.focusId;
     if (focusId) appendToggle("俯瞰", () => goList(focusId));
+    // ゴールだけの地図へ上がる（「もっと俯瞰」）。俯瞰が「ここから下を一息に」
+    // なのに対して、こちらは**間のノードを畳んでゴールだけを浮上させる**。
+    if (focusId) appendToggle("地図", () => goMap());
   };
 
   const renderCenter = (): void => {
@@ -1233,7 +1399,21 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     // 残っているとスクロールが二重になるので、モードで切り替える。
     body.classList.toggle("graph", state.mode === "graph" && !!state.focusId);
     if (state.mode === "graph" && state.focusId) {
-      renderGraph(body, state.graph, state.focusId, state.rev, state.cycles.cyclic, { onSelect: select, onDrill: drill, onInsert: openInsert }, state.selectedId);
+      // 地図では**描くグラフと状態を引くグラフが違う**。商グラフの上で状態を
+      // 導くと、畳んだぶんだけ前提が消えて「今やれる」に見える。
+      const map = state.layer === "goals";
+      const drawn = map ? state.goals.graph : state.graph;
+      const rev = map ? state.goals.rev : state.rev;
+      renderGraph(
+        body,
+        drawn,
+        state.focusId,
+        rev,
+        state.cycles.cyclic,
+        { onSelect: select, onDrill: drill, onInsert: openInsert },
+        state.selectedId,
+        map ? { stateGraph: state.graph, between: state.goals.between } : undefined,
+      );
       return;
     }
     // 検索は常に全体にかける。検索欄はヘッダーにある全体の道具なので、
@@ -1284,8 +1464,14 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     // 何も選んでいない間はインスペクタごと畳む。起動直後は「どれをやるか選ぶ」
     // 段階で、まだ詳細を見る相手がいない。空のパネルで画面の3割を占めるより、
     // 一覧に幅を渡す方がこの画面の仕事に合っている。
+    // 地図に載っていないものが中心になっていたら、黙って詳細へ落とす。
+    // ゴール宣言を外した・親が付いた・外でファイルが変わった、のどれでも起きる。
+    if (state.layer === "goals" && (state.focusId === undefined || !state.goals.graph.nodes[state.focusId])) {
+      state.layer = "detail";
+    }
     document.body.classList.toggle("no-inspector", !state.selectedId || !state.graph.nodes[state.selectedId]);
     renderIssueBadge();
+    renderUndoBtn();
     renderSidebar();
     renderBreadcrumb();
     renderCenter();
@@ -1297,6 +1483,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       onRename: (id, name) => void rename(id, name),
       onDelete: (id) => void removeNode(id),
       onColor: (id, color) => void setColor(id, color),
+      onGoal: (id, on) => void setGoal(id, on),
       onDetach: (parentId, childId) => void detach(parentId, childId),
     });
   };

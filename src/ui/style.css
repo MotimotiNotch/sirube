@@ -683,6 +683,43 @@ body.no-inspector #inspector-resizer {
    と選択が同じ語彙になると、線の色が何を言っているのか決まらなくなる。 */
 .graph-edge.on { stroke: var(--fg); stroke-width: 2.2; }
 .edge-label { font-size: 10px; fill: var(--fg-faint); }
+/* ゴール層（地図）の線。**実線（前提）でも破線（内包）でもない。**
+   縮約で2種類が1本に畳まれているので、どちらの語彙も借りない。点線にすると
+   「間が抜けている」ことが線の形そのもので言える。 */
+.graph-edge.goal { stroke-dasharray: 2 3.5; }
+/* 線の上に置く「間に何件畳んだか」。線と重なるので、背景色で縁取りしてから
+   描く（paint-order）。数字が線に潰されると、桁を読み違える。 */
+.edge-between {
+  font-size: 10px;
+  fill: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+/* 地図に出す付箋。サイドバーの `.goal-tag` と同じ形（棒）で、SVG なので
+   background ではなく fill で塗る。 */
+.map-tag-yellow { fill: var(--tag-yellow); }
+.map-tag-orange { fill: var(--tag-orange); }
+.map-tag-pink   { fill: var(--tag-pink); }
+.map-tag-purple { fill: var(--tag-purple); }
+.map-tag-blue   { fill: var(--tag-blue); }
+.map-tag-green  { fill: var(--tag-green); }
+
+/* パンくずに出す縮尺の札（地図）。押せないので、ボタンと同じ見た目にしない。 */
+.crumb-layer {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+/* インスペクタの補足行。操作の結果を1行で言う場所。 */
+.insp-note { margin: 6px 0 0; font-size: 11px; color: var(--fg-muted); line-height: 1.5; }
 
 /* --- 中身の一覧（フライアウト） ------------------------------------------ */
 
@@ -899,7 +936,20 @@ body.no-inspector #inspector-resizer {
   padding: 8px 10px;
   word-break: break-all;
 }
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+/* 決定ボタンは常に見えるところに置く。モーダル自体がスクロール領域（max-height
+   80vh）なので、中身が長いと**ボタンが折り返しの下へ流れる**。トグルの下見は
+   実データで15件出たことがあり、そこが一番「押せない」画面になりやすい。
+   下パディングぶん食い込ませて、スクロールしても底に貼り付ける。 */
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  position: sticky;
+  bottom: -20px;
+  margin: 14px -20px -20px;
+  padding: 12px 20px 20px;
+  background: var(--bg-panel);
+}
 
 /* --- まとめて追加（DSL） -------------------------------------------------- */
 

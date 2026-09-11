@@ -2,8 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { parseDsl, parseBulkRequires, buildBulkRequiresDsl } from "./dsl.ts";
 import {
   analyzeCycles,
+  applyTogglePlan,
+  applyUndo,
   blockedByCycle,
   buildReverseIndex,
+  canUndo,
+  captureUndo,
   cyclicNodes,
   descendantOutline,
   descendantProgress,
@@ -261,6 +265,86 @@ describe("トグルの下見", () => {
     const plan = planToggle(graph, "目的", rev);
     expect(plan.changes.filter((c) => c.id === "共通").length).toBe(1);
     expect(plan.changes.length).toBe(4);
+  });
+});
+
+describe("直前のトグルを戻す", () => {
+  /** 全ノードの `satisfied` を並べて比べるための写し。 */
+  const snapshot = (graph: Graph): Record<string, boolean> =>
+    Object.fromEntries(Object.keys(graph.nodes).sort().map((id) => [id, graph.nodes[id]!.satisfied]));
+
+  test("もう一度押しても元には戻らない（戻す仕組みが要る理由）", () => {
+    // 往路は前提を遡って埋め、復路は下流を戻す——向きが違う。同じノードを
+    // 2回押すと、埋まった前提は残ったまま、代わりに別のノードが未達に落ちる。
+    const graph = g("引っ越し -> 引っ越し先の家 -> 不動産に行く");
+    const before = snapshot(graph);
+    const rev = buildReverseIndex(graph);
+
+    toggleSatisfied(graph, "引っ越し先の家", rev);
+    toggleSatisfied(graph, "引っ越し先の家", rev);
+
+    expect(snapshot(graph)).not.toEqual(before);
+    expect(graph.nodes["不動産に行く"]!.satisfied).toBe(true); // 埋まった前提が残る
+  });
+
+  test("控えを戻すと、押す前と1ビットも変わらない", () => {
+    const graph = g("目的 -> 手順書 -> 下調べ, 目的 -> [部品A]");
+    graph.nodes["部品A"]!.satisfied = true;
+    const before = snapshot(graph);
+
+    const plan = planToggle(graph, "手順書", buildReverseIndex(graph));
+    const undo = captureUndo(graph, plan);
+    applyTogglePlan(graph, plan);
+    expect(snapshot(graph)).not.toEqual(before);
+
+    expect(applyUndo(graph, undo).sort()).toEqual(["下調べ", "手順書", "目的"]);
+    expect(snapshot(graph)).toEqual(before);
+  });
+
+  test("取り消しの下流も同じように戻る", () => {
+    const graph = g("引っ越し -> 引っ越し先の家 -> 不動産に行く");
+    for (const id of Object.keys(graph.nodes)) graph.nodes[id]!.satisfied = true;
+    const before = snapshot(graph);
+
+    const plan = planToggle(graph, "引っ越し先の家", buildReverseIndex(graph));
+    const undo = captureUndo(graph, plan);
+    applyTogglePlan(graph, plan);
+    applyUndo(graph, undo);
+    expect(snapshot(graph)).toEqual(before);
+  });
+
+  test("控えに入るのは実際に書き換わったノードだけ", () => {
+    // 既に達成済みの前提は「変わらない」ので、戻す対象でもない。ここを
+    // 混ぜると、押す前から達成だったノードを未達へ落としてしまう。
+    const graph = g("引っ越し -> 引っ越し先の家 -> 不動産に行く");
+    graph.nodes["不動産に行く"]!.satisfied = true;
+    const plan = planToggle(graph, "引っ越し先の家", buildReverseIndex(graph));
+    expect(captureUndo(graph, plan).entries).toEqual([
+      { id: "引っ越し先の家", before: false, after: true },
+    ]);
+  });
+
+  test("外で1件でも書き換わっていたら戻さない", () => {
+    // 巻き戻しは「自分が書いた値を消す」操作。他人（Obsidian / AI / git）の
+    // 書き込みまで消さないよう、食い違ったら丸ごと諦める。
+    const graph = g("目的 -> 手順書 -> 下調べ");
+    const plan = planToggle(graph, "手順書", buildReverseIndex(graph));
+    const undo = captureUndo(graph, plan);
+    applyTogglePlan(graph, plan);
+    expect(canUndo(graph, undo)).toBe(true);
+
+    graph.nodes["下調べ"]!.satisfied = false; // 外が触った
+    expect(canUndo(graph, undo)).toBe(false);
+  });
+
+  test("戻したあとの控えはもう使えない（二度押しで先へ行かない）", () => {
+    const graph = g("目的 -> 手順書 -> 下調べ");
+    const plan = planToggle(graph, "手順書", buildReverseIndex(graph));
+    const undo = captureUndo(graph, plan);
+    applyTogglePlan(graph, plan);
+    applyUndo(graph, undo);
+    expect(canUndo(graph, undo)).toBe(false);
+    expect(applyUndo(graph, undo)).toEqual([]);
   });
 });
 
