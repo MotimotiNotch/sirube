@@ -3,7 +3,7 @@
 // サーバは無い。ストアもエンジンもここ（フロント）で動き、ファイルアクセスだけ
 // `SirubeFs` の実装を差し替える（開発中はメモリ、Tauri ではプラグイン fs）。
 
-import { analyzeCycles, buildReverseIndex, canUndo, hasChildren, progress, resolveState, roots, type CycleInfo, type ReverseIndex, type TogglePlan, type ToggleUndo } from "../core/engine.ts";
+import { analyzeCycles, buildReverseIndex, canUndo, hasChildren, inDegree, progress, resolveState, roots, type CycleInfo, type ReverseIndex, type TogglePlan, type ToggleUndo } from "../core/engine.ts";
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
 import { enclosingGoal, goalLayer, goalRoots, type GoalLayer } from "../core/goals.ts";
 import { parseDsl } from "../core/dsl.ts";
@@ -338,6 +338,35 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   };
 
   /**
+   * 焦点のノードを押したら、**潜る前の場所へ1つ戻る**（2026-09-12、のっち依頼）。
+   *
+   * 入ったのと同じノードで出られるようにする、というだけの話。これまで焦点は
+   * 押しても選び直すだけで、戻る道はパンくずにしか無かった。**入口と出口が
+   * 別の場所にあると、潜るほど「どこを押せば戻れるか」を覚える量が増える。**
+   *
+   * 押したノードは**選んだまま**にする。戻るのは縮尺の話で、何を見ていたかは
+   * 変わらない——上がった拍子に右パネルが別のノードに差し替わると、戻ったのか
+   * 飛んだのか分からなくなる。
+   *
+   * **道が空なら何もしない**（これまでどおり選び直すだけ）。パンくずの左隣は
+   * 「今やれること」だが、そこまで飛ばすと*潜っていないのに画面が変わる*。
+   * ここが引き受けるのは「潜ったぶんを戻す」だけで、TOP へ出るのはパンくずの役。
+   */
+  const ascend = (id: string): void => {
+    const parent = state.trail[state.trail.length - 1];
+    if (parent === undefined || !state.graph.nodes[parent]) {
+      select(id);
+      return;
+    }
+    state.trail = state.trail.slice(0, -1);
+    state.focusId = parent;
+    state.selectedId = id;
+    state.scopeId = undefined;
+    state.mode = "graph";
+    render();
+  };
+
+  /**
    * 地図へ上がる（「もっと俯瞰」）。**今いる場所を包む一番近いゴールが中心**になる。
    *
    * 位置を捨てないのが肝。地図をいつも根から出すと、深いところで作業していた人が
@@ -596,6 +625,10 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     const node = state.graph.nodes[id];
     if (!node) return;
     if (on) node.goal = true;
+    // 外すときに `false` を書くのは、**書かないと外れない場所だけ**（入次数0）。
+    // それ以外は未指定へ戻す。全ファイルに `goal: false` が散ると、読む人には
+    // 「宣言した結果ゴールでない」に見えて、タグのように使えると誤解される。
+    else if (inDegree(id, state.rev) === 0) node.goal = false;
     else delete node.goal;
     await store.persist(state.graph, [id]);
     recompute();
@@ -1410,7 +1443,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         state.focusId,
         rev,
         state.cycles.cyclic,
-        { onSelect: select, onDrill: drill, onInsert: openInsert },
+        { onSelect: select, onDrill: drill, onAscend: ascend, onInsert: openInsert },
         state.selectedId,
         map ? { stateGraph: state.graph, between: state.goals.between } : undefined,
       );

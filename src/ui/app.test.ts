@@ -1681,6 +1681,48 @@ describe("グラフのノードを押したとき", () => {
     expect(text("breadcrumb")).toContain("MVP実装完了");
     expect($("center-body").querySelector("svg")).toBeTruthy();
   });
+
+  test("入ったノードをもう一度押すと1つ戻る（入口と出口を同じにする）", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    await clickNode("MVP実装完了");
+    expect(text("breadcrumb")).toContain("MVP実装完了");
+
+    // 焦点になっている当人を押す。潜る前の場所が中心に戻る。
+    await clickNode("MVP実装完了");
+    expect(text("breadcrumb")).not.toContain("MVP実装完了");
+    expect(text("breadcrumb")).toContain("Sirube をリリースする");
+    // 見ていたものは変えない。上がった拍子に右パネルが差し替わると、
+    // 戻ったのか飛んだのか分からなくなる。
+    expect(text("inspector")).toContain("MVP実装完了");
+  });
+
+  test("2段潜ってから2回押すと、1段ずつ戻る", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    await clickNode("MVP実装完了");
+    await clickNode("Markdownノードストア");
+    expect(text("breadcrumb")).toContain("Markdownノードストア");
+
+    await clickNode("Markdownノードストア");
+    expect(text("breadcrumb")).toContain("MVP実装完了");
+    expect(text("breadcrumb")).not.toContain("Markdownノードストア");
+
+    await clickNode("MVP実装完了");
+    expect(text("breadcrumb")).toContain("Sirube をリリースする");
+    expect(text("breadcrumb")).not.toContain("MVP実装完了");
+  });
+
+  test("潜っていなければ押しても動かない。選び直すだけ", async () => {
+    // パンくずの左隣は「今やれること」だが、そこまで飛ばすと**潜っていないのに
+    // 画面が変わる**。TOP へ出るのはパンくずの役で、ここは潜ったぶんしか戻さない。
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    const before = text("breadcrumb");
+    await clickNode("Sirube をリリースする");
+    expect(text("breadcrumb")).toBe(before);
+    expect(text("inspector")).toContain("Sirube をリリースする");
+  });
 });
 
 describe("ゴールの地図（もっと俯瞰）", () => {
@@ -1705,15 +1747,23 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     ) as HTMLButtonElement;
     row.click();
     await tick();
-    findButton("inspector", "ゴールにする")!.click();
+    findButton("inspector", "地図に出す")!.click();
     await tick();
   };
 
-  test("入次数0のノードは自動でゴール。宣言のボタンは出さない", async () => {
+  test("入次数0のノードは自動でゴール。それでも地図から外せる", async () => {
+    // 以前はここでボタンを出していなかった（外しても次の読み込みで戻るため）。
+    // `goal: false` を降格として保存するようにして、外せるようにした（2026-09-11）。
     findButton("root-list", "Sirube をリリースする")!.click();
     await tick();
-    expect(text("inspector")).toContain("自動でゴールです");
-    expect(findButton("inspector", "ゴールにする")).toBeUndefined();
+    expect(text("inspector")).toContain("書かなくてもゴールです");
+    // 外すと一帯が地図から消えることを、押す前に読める位置に出す
+    expect(text("inspector")).toContain("先にそちらを出しておいて");
+
+    findButton("inspector", "地図から外す")!.click();
+    await tick();
+    expect(findButton("inspector", "地図に出す")).toBeTruthy();
+    expect(text("inspector")).toContain("地図から外してあります");
   });
 
   test("地図へ上がると、今いる場所を包む一番近いゴールが中心になる", async () => {
@@ -1724,6 +1774,26 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     await tick();
     // 立てた本人がゴールなので、その場で中心になる
     expect(crumb()).toContain("Tauriシェル");
+    expect($("breadcrumb").querySelector(".crumb-layer")).toBeTruthy();
+  });
+
+  test("地図で中心のゴールを押しても、地図から落ちない", async () => {
+    // 「押すと1つ戻る」を足したときの足元の穴。地図に上がると道は空になるので、
+    // 戻り先が無い。ここで TOP へ出したり、グラフへ降りたりすると、
+    // **押した覚えのない縮尺に落ちる**。
+    await declareTauriGoal();
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    toggle("地図").click();
+    await tick();
+    const before = crumb();
+
+    Array.from($("center-body").querySelectorAll("g.graph-node"))
+      .find((g) => (g.textContent ?? "").includes("Sirube をリリースする"))!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+
+    expect(crumb()).toBe(before);
     expect($("breadcrumb").querySelector(".crumb-layer")).toBeTruthy();
   });
 

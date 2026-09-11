@@ -35,11 +35,47 @@ describe("ゴールの判定", () => {
     expect(resolveState(graph, "途中", new Set())).toBe("BLOCKED");
   });
 
-  test("入次数0のノードは `goal` を外しても外れない", () => {
-    // 外せるようにすると、押しても次の読み込みで戻る「効かないボタン」になる。
+  test("入次数0のノードは `goal` が未指定でもゴールのまま", () => {
+    // 「未指定」は降格ではない。ここが外れると、何も書いていない vault の
+    // 入口が丸ごと空になる。降りたいときは `false` を書く（次のテスト）。
     const graph = g("目的 -> 末端");
     delete graph.nodes["目的"]!.goal;
     expect(isGoal(graph, "目的", rev(graph))).toBe(true);
+  });
+
+  test("`goal: false` は入次数0にも勝つ（終わらない根を地図から外す）", () => {
+    const graph = g("哲学を体現する -> 記事で表明する -> 記事を1本書く");
+    graph.nodes["哲学を体現する"]!.goal = false;
+    graph.nodes["記事で表明する"]!.goal = true;
+
+    expect(isGoal(graph, "哲学を体現する", rev(graph))).toBe(false);
+    expect(goalIds(graph, rev(graph))).toEqual(["記事で表明する"]);
+    // 降格は構造を変えない。前提も状態もそのまま。
+    expect(graph.nodes["哲学を体現する"]!.requires).toEqual(["記事で表明する"]);
+    expect(resolveState(graph, "哲学を体現する", new Set())).toBe("BLOCKED");
+  });
+
+  test("根を降格しても下は自動で昇格しない（地図から消える）", () => {
+    // 足元の穴。親のノードは残るので下の入次数は0にならない。
+    // **消えることをテストで固定しておく**——気付かずに入口を空にしないため。
+    const graph = g("根 -> 中腹 -> 末端");
+    graph.nodes["根"]!.goal = false;
+    expect(goalIds(graph, rev(graph))).toEqual([]);
+
+    graph.nodes["中腹"]!.goal = true;
+    expect(goalIds(graph, rev(graph))).toEqual(["中腹"]);
+  });
+
+  test("降格した根は地図の段を1つ食わなくなる", () => {
+    // 実データの縮図。根を外すと、その下に並んでいた2つがそのまま地図の根になる。
+    const graph = g("終わらない根 -> [A], 終わらない根 -> [B]");
+    graph.nodes["A"]!.goal = true;
+    graph.nodes["B"]!.goal = true;
+
+    expect(goalRoots(goalLayer(graph, rev(graph)))).toEqual(["終わらない根"]);
+
+    graph.nodes["終わらない根"]!.goal = false;
+    expect(goalRoots(goalLayer(graph, rev(graph))).sort()).toEqual(["A", "B"]);
   });
 });
 

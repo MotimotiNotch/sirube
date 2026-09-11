@@ -79,8 +79,8 @@ describe("frontmatter", () => {
     expect(odd.issues).toEqual([]);
   });
 
-  test("ゴール宣言は往復する。立っていないときは書かない", () => {
-    // 書くのは `true` のときだけ。`goal: false` を全ファイルに撒くと、入次数0で
+  test("ゴール宣言は三状態で往復する。書いていないものには足さない", () => {
+    // 未指定のまま撒かない。`goal: false` を全ファイルに書くと、入次数0で
     // 自動的にゴールになっているノードが「宣言した結果ゴールでない」ように読める。
     const plain = parseNodeFile("A", md("satisfied: false\nrequires: []\ncontains: []"), 0).node;
     expect(plain.goal).toBeUndefined();
@@ -92,9 +92,12 @@ describe("frontmatter", () => {
     expect(text).toContain("goal: true");
     expect(parseNodeFile("B", text, 0).node).toEqual(node);
 
-    // `goal: false` は書かれていないのと同じに畳む
+    // **`false` も往復する**（2026-09-11）。畳むと降格が次の保存で消えるため。
     const off = parseNodeFile("C", md("goal: false\nsatisfied: false\nrequires: []\ncontains: []"), 0).node;
-    expect(off.goal).toBeUndefined();
+    expect(off.goal).toBe(false);
+    const offText = serializeNodeFile(off);
+    expect(offText).toContain("goal: false");
+    expect(parseNodeFile("C", offText, 0).node).toEqual(off);
   });
 
   test("空の配列は [] で書かれる", () => {

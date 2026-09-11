@@ -132,29 +132,32 @@ export function renderInspector(
   // （のっち）。かといって切り離すと、何のためにあったのかが消える。**位置は
   // そのままで、入口としても扱う**ためにここで指す。
   {
-    // 誰からも要求されていないノードは、書かなくてもゴール。ここで外させない
-    // ——外しても次の読み込みでまたゴールに戻るので、効かないボタンになる。
+    // 入次数0のノードも**外せる**（2026-09-11）。以前はここを出していなかった
+    // ——外しても次の読み込みでゴールに戻るので効かないボタンになる、という理由
+    // だった。`goal: false` を降格として保存するようにしたので、その前提が消えた。
+    // 終わらない根（`哲学を体現する`）が地図の段を1つ食っていたのを外すための口。
     const auto = inDegree(selectedId, rev) === 0;
+    const on = isGoal(graph, selectedId, rev);
     const sec = h("div", { class: "insp-section" });
     const head = h("h4");
     head.append(iconSpan("compass", 12), "ゴール");
     sec.append(head);
-    if (auto) {
-      sec.append(h("p", { class: "insp-note" }, ["どこからも要求されていないので、自動でゴールです。"]));
-    } else {
-      const on = node.goal === true;
-      const btn = h("button", { class: `btn${on ? " primary" : ""}`, type: "button", "aria-pressed": on ? "true" : "false" });
-      btn.append(iconSpan("compass", 14), on ? "ゴールをやめる" : "ゴールにする");
-      btn.addEventListener("click", () => cb.onGoal(selectedId, !on));
-      sec.append(btn);
-      sec.append(
-        h("p", { class: "insp-note" }, [
-          on
-            ? "地図に出ます。ここまでの道は畳まれ、間の件数だけが線に残ります。"
-            : "地図に出したいときに押します。構造は変わりません（状態も進捗もそのまま）。",
-        ]),
-      );
-    }
+
+    const btn = h("button", { class: `btn${on ? " primary" : ""}`, type: "button", "aria-pressed": on ? "true" : "false" });
+    btn.append(iconSpan("compass", 14), on ? "地図から外す" : "地図に出す");
+    btn.addEventListener("click", () => cb.onGoal(selectedId, !on));
+    sec.append(btn);
+
+    // 説明は3通り。**外したときに何が起きるかを、押す前に読める位置に置く**
+    // ——根を外すと、その下に `goal: true` が1つも無い場合、一帯が地図から消える。
+    const note = on
+      ? auto
+        ? "どこからも要求されていないので、書かなくてもゴールです。外すと地図から消えます——下に地図へ出したいものがあるなら、先にそちらを出しておいてください。"
+        : "地図に出ています。ここまでの道は畳まれ、間の件数だけが線に残ります。"
+      : auto
+        ? "地図から外してあります。構造はそのままで、地図と入口に出ないだけです。"
+        : "地図に出したいときに押します。構造は変わりません（状態も進捗もそのまま）。";
+    sec.append(h("p", { class: "insp-note" }, [note]));
     container.append(sec);
   }
 

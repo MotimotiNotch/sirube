@@ -99,7 +99,7 @@ export function parseNodeFile(id: string, text: string, mtimeMs: number): ParseN
           requires: asStringArray(loose?.requires),
           contains: asStringArray(loose?.contains),
           number: Number.isInteger(loose?.number) && (loose?.number as number) > 0 ? (loose?.number as number) : undefined,
-          goal: loose?.goal === true ? true : undefined,
+          goal: typeof loose?.goal === "boolean" ? (loose.goal as boolean) : undefined,
           due: typeof loose?.due === "string" ? loose.due : undefined,
           color: typeof loose?.color === "string" ? loose.color : undefined,
         };
@@ -113,9 +113,14 @@ export function parseNodeFile(id: string, text: string, mtimeMs: number): ParseN
   node.requires = dedupe(fm.requires);
   node.contains = dedupe(fm.contains);
   if (fm.number !== undefined) node.number = fm.number;
-  // `goal: false` は書かれていないのと同じに畳む。値を持っていると「宣言した
-  // 結果ゴールでない」ように読めるが、入次数0なら書いてあってもゴールになる。
-  if (fm.goal === true) node.goal = true;
+  // `goal` は三状態で持つ。`true` は昇格、**`false` は降格**（入次数0でも地図に
+  // 出さない）、未指定は入次数0で自動。
+  //
+  // 2026-09-11 まで `false` は「書かれていないのと同じ」に畳んでいた——入次数0なら
+  // 書いてあってもゴールになるので、値を持つと嘘になるという理由だった。
+  // 終わらない根（`哲学を体現する`）を地図から外す手段が他に無く、フィールドは
+  // 増やせないので、ここを畳むのをやめて `isGoal` 側で勝たせる形にした。
+  if (typeof fm.goal === "boolean") node.goal = fm.goal;
   if (fm.due !== undefined) node.due = fm.due;
   if (fm.color !== undefined) node.color = fm.color;
   node.note = body;
@@ -160,8 +165,9 @@ export function serializeNodeFile(node: Node, nameOf?: (id: string) => string | 
   // 番号は名前の次。人が最初に読む2つを上に固めておく。
   if (node.number !== undefined) fm.number = node.number;
   // ゴール宣言は名前・番号の次。人が最初に読む位置に置く（入口に出るかどうかを
-  // 決める1行なので、`requires` の下に埋もれると見落とす）。真のときだけ書く。
-  if (node.goal === true) fm.goal = true;
+  // 決める1行なので、`requires` の下に埋もれると見落とす）。
+  // **`false` も書き戻す**——降格は「書いていない」と区別が付かないと往復で消える。
+  if (typeof node.goal === "boolean") fm.goal = node.goal;
   fm.satisfied = node.satisfied;
   fm.requires = node.requires;
   fm.contains = node.contains;

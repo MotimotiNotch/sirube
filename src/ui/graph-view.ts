@@ -66,6 +66,8 @@ export interface GoalOverview {
 export interface GraphViewCallbacks {
   onSelect(id: string): void;
   onDrill(id: string): void;
+  /** 焦点のノードを押した。**潜る前の場所へ1つ戻る。** */
+  onAscend(id: string): void;
   /** エッジを押した。その2つの**間に**新しいノードを差し込む。 */
   onInsert(parentId: string, childId: string, kind: "requires" | "contains"): void;
 }
@@ -482,7 +484,13 @@ export function renderGraph(
       // 行って戻るのに往復2クリックかかる（のっち報告 2026-09-03「無駄に前提で
       // ドリルされるとよく分からない。クリックが余計に要求されてる」）。
       // 潜って得られるものは、選んだときに右パネルへ出るものと同じ。
-      if (b.kind === "focus" || !hasChildren(graph, b.id)) cb.onSelect(b.id);
+      //
+      // **焦点は押すと1つ戻る**（のっち依頼 2026-09-12）。入ったのと同じ
+      // ノードで出られるようにするため。道が空のときに選び直しへ落ちるのは
+      // 呼び先（`ascend`）の判断で、ここでは分けない——「焦点かどうか」しか
+      // 見ていない場所に、道の深さという別の条件を持ち込まない。
+      if (b.kind === "focus") cb.onAscend(b.id);
+      else if (!hasChildren(graph, b.id)) cb.onSelect(b.id);
       else cb.onDrill(b.id);
     });
 
