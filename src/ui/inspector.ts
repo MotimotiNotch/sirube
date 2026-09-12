@@ -306,6 +306,15 @@ export function renderInspector(
     noteSec.append(area);
   } else {
     modeBtn.addEventListener("click", () => cb.onNoteEdit(true));
+    // メモの右クリック（2026-09-12、のっち依頼）。**奪うのは閲覧のときだけ。**
+    // 入力欄の上では貼り付けが要るし、**文字を選んでいるときも既定に任せる**
+    // ——選んだところをコピーするのが右クリックの一番よくある用途で、そこを
+    // 潰すと「読む画面」から文字が持ち出せなくなる。
+    noteSec.addEventListener("contextmenu", (ev) => {
+      if ((window.getSelection()?.toString() ?? "") !== "") return;
+      ev.preventDefault();
+      cb.onMenu({ kind: "note", id: selectedId }, ev.clientX, ev.clientY);
+    });
     if (node.note.trim() === "") {
       noteSec.append(h("p", { class: "insp-note" }, ["まだメモはありません。「編集」で書けます。"]));
     } else {

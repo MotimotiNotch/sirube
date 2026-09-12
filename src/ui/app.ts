@@ -370,6 +370,23 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     render();
   };
 
+  /**
+   * メモを丸ごとクリップボードへ。
+   *
+   * **押した流れのまま呼ぶ**——`await` を1つでも挟んでから呼ぶと、ブラウザが
+   * 「利用者の操作の最中」と見なす猶予が切れて、**黙って失敗する**（権限が
+   * 落ちるだけで例外も出ないことがある）。ここは最初の1行で書き込む。
+   */
+  const copyNote = async (text: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("メモをコピーしました");
+    } catch {
+      // WebView やブラウザの設定で塞がっていることがある。黙って諦めない。
+      toast("コピーできませんでした");
+    }
+  };
+
   const drill = (id: string): void => {
     if (!state.graph.nodes[id]) return;
     if (state.focusId && state.focusId !== id) state.trail.push(state.focusId);
@@ -763,6 +780,21 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         danger: true,
         onSelect: () => void detach(target.parentId, target.childId),
       });
+    } else if (target.kind === "note") {
+      const node = state.graph.nodes[target.id];
+      if (!node) return;
+      items.push({
+        label: "編集する",
+        icon: "pencil",
+        onSelect: () => {
+          state.insp.noteEditing = true;
+          render();
+        },
+      });
+      // 空のメモをコピーしても何も起きない。項目は出さない。
+      if (node.note.trim() !== "") {
+        items.push({ label: "メモをコピー", icon: "stickyNote", onSelect: () => void copyNote(node.note) });
+      }
     } else {
       items.push({ label: "目的を1つ作る", icon: "plus", onSelect: () => openAdd("one") });
       items.push({ label: "まとめて追加", icon: "listChecks", onSelect: () => openAdd("bulk") });

@@ -4,12 +4,13 @@
 // 文字として残る）と、**文字列から HTML を起こさないこと**（本文は人が書いた
 // ものがそのまま来る）。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { describe, expect, test } from "bun:test";
 
-// app.test.ts も同じ登録をする。**二重に登録しない**——テストファイルが同じ
-// プロセスに載ることがあり、そのとき2度目が壊れる。
-if (typeof globalThis.document === "undefined") GlobalRegistrator.register();
+// 登録はプロセスに1回だけ（`test-dom.ts` のコメント参照）。ここで直接
+// `register()` を呼ぶと、app.test.ts と2つになった瞬間に読み込み順で落ちる。
+import { ensureDom } from "./test-dom.ts";
+
+ensureDom();
 
 const { renderNote } = await import("./note-view.ts");
 

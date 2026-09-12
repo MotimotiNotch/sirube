@@ -22,6 +22,7 @@ import type { IconName } from "./icons.ts";
 export type MenuTarget =
   | { kind: "node"; id: string }
   | { kind: "edge"; parentId: string; childId: string; edge: "requires" | "contains" }
+  | { kind: "note"; id: string }
   | { kind: "space" };
 
 export interface MenuItem {

@@ -4,10 +4,11 @@
 // 実機の見た目・操作感は別途のっちが確認する（AI の確認だけで「完了」と
 // 言い切らない運用）。ここで担保するのは「壊れていないこと」まで。
 
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 
-GlobalRegistrator.register();
+import { ensureDom } from "./test-dom.ts";
+
+ensureDom();
 
 const { startApp } = await import("./app.ts");
 const { sampleFs } = await import("../dev/sample.ts");
@@ -44,10 +45,6 @@ beforeEach(async () => {
   // いた先から始まる（復元を入れた 2026-09-03 に実際3件が落ちた）。
   localStorage.clear();
   await startApp(sampleFs());
-});
-
-afterAll(() => {
-  void GlobalRegistrator.unregister();
 });
 
 describe("起動直後", () => {
@@ -1916,6 +1913,51 @@ describe("右クリックのメニュー", () => {
     expect(menu()).toBeTruthy();
     document.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     expect(menu()).toBeNull();
+  });
+
+  test("メモは閲覧のときだけ奪う（編集中は貼り付けが要る）", async () => {
+    await openGraph();
+    Array.from($("center-body").querySelectorAll("g.graph-node"))
+      .find((g) => (g.textContent ?? "").includes("マネタイズ方針を決める"))!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+
+    const viewEv = await rightClick($("inspector").querySelector(".note-view")!);
+    expect(viewEv.defaultPrevented).toBe(true);
+    expect(menuLabels().join(" ")).toContain("編集する");
+    expect(menuLabels().join(" ")).toContain("メモをコピー");
+
+    // 「編集する」で入力欄になる
+    menuItem("編集する").click();
+    await tick();
+    const area = $("inspector").querySelector(".note-area")!;
+    expect(area).toBeTruthy();
+
+    // 入力欄の上では**奪わない**。ここを潰すと貼り付けができなくなる。
+    const editEv = await rightClick(area);
+    expect(editEv.defaultPrevented).toBe(false);
+    expect(menu()).toBeNull();
+  });
+
+  test("メモの文字を選んでいるときは奪わない（既定のコピーを残す）", async () => {
+    await openGraph();
+    Array.from($("center-body").querySelectorAll("g.graph-node"))
+      .find((g) => (g.textContent ?? "").includes("マネタイズ方針を決める"))!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+
+    const body = $("inspector").querySelector(".note-view")!;
+    const range = document.createRange();
+    range.selectNodeContents(body);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    expect(sel.toString()).not.toBe(""); // 陽性対照。選べていないと検査にならない
+
+    const ev = await rightClick(body);
+    expect(ev.defaultPrevented).toBe(false);
+    expect(menu()).toBeNull();
+    sel.removeAllRanges();
   });
 
   test("削除は載せない（取り消しが無いので、確認のあるインスペクタに残す）", async () => {
