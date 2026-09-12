@@ -29,6 +29,14 @@ const buttonsIn = (id: string): HTMLButtonElement[] => Array.from($(id).querySel
 const findButton = (id: string, label: string): HTMLButtonElement | undefined =>
   buttonsIn(id).find((b) => (b.textContent ?? "").includes(label));
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+/** ゴールと削除は「その他」に畳んである（2026-09-12）。触る前に開く。 */
+const openMore = async (): Promise<void> => {
+  const btn = findButton("inspector", "その他");
+  if (btn && !btn.classList.contains("open")) {
+    btn.click();
+    await tick();
+  }
+};
 
 beforeEach(async () => {
   document.body.innerHTML = HTML;
@@ -876,6 +884,7 @@ describe("改名と削除", () => {
   });
 
   test("削除は一度受け止める。やめれば消えない", async () => {
+    await openMore();
     findButton("inspector", "このノードを削除")!.click();
     expect(text("inspector")).toContain("取り消せません");
     findButton("inspector", "やめる")!.click();
@@ -887,6 +896,7 @@ describe("改名と削除", () => {
   test("削除で目的が生えるなら、押す前に件数と名前を出す", async () => {
     // ルート判定が入次数0なので、中間ノードを消すとその子が目的として現れる。
     // 構造としては正しいが、削除の副作用としては予想できない。
+    await openMore();
     findButton("inspector", "このノードを削除")!.click();
     expect(text("inspector")).toContain("1 件");
     expect(text("inspector")).toContain("領収書整理");
@@ -894,6 +904,7 @@ describe("改名と削除", () => {
   });
 
   test("削除すると参照側からも外れる", async () => {
+    await openMore();
     findButton("inspector", "このノードを削除")!.click();
     findButton("inspector", "削除する")!.click();
     await tick();
@@ -1023,8 +1034,17 @@ describe("まとめて追加（DSL）", () => {
   test("繋がりだけを外せる（A -> C に B を挟む）", async () => {
     // 追加しかできないと、B を挟んでも A -> C が残って併存する
     // （のっち 2026-09-03。Warframe 版は reparentNode で解決済み）。
-    const cutButton = (): HTMLButtonElement =>
-      $("inspector").querySelector(".insp-cut") as HTMLButtonElement;
+    // 外す口は**上向きリンクの右クリック**（2026-09-12 に `×` から移した）。
+    const cutFromMenu = async (): Promise<void> => {
+      $("inspector")
+        .querySelector(".insp-link-row")!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+      await tick();
+      (Array.from(document.querySelectorAll(".ctx-item")).find((b) =>
+        (b.textContent ?? "").includes("を外す"),
+      ) as HTMLButtonElement).click();
+      await tick();
+    };
 
     // 確定申告 -> 領収書整理。領収書整理 を選ぶと「これを待っている」に出る。
     findButton("root-list", "確定申告")!.click();
@@ -1035,7 +1055,7 @@ describe("まとめて追加（DSL）", () => {
     await tick();
     expect(text("inspector")).toContain("確定申告");
 
-    cutButton().click();
+    await cutFromMenu();
     await tick();
 
     // 繋がりだけが消え、**ノードはどちらも残る**
@@ -1725,6 +1745,188 @@ describe("グラフのノードを押したとき", () => {
   });
 });
 
+describe("右パネルの整理", () => {
+  /** 目的ならサイドバーから、そうでなければ `Sirube をリリースする` の
+   *  グラフから選ぶ（メモがあるノードは目的の下にいる）。 */
+  const openNode = async (name: string): Promise<void> => {
+    const root = findButton("root-list", name);
+    if (root) {
+      root.click();
+      await tick();
+      return;
+    }
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    Array.from($("center-body").querySelectorAll("g.graph-node"))
+      .find((g) => (g.textContent ?? "").includes(name))!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+  };
+
+  test("ゴールと削除は「その他」に畳んである", async () => {
+    // どちらも**たまにしか押さないが、押す前に読ませたい説明がある**もの。
+    // 日々のゴール切り替えは右クリックにもあるので、開きっぱなしにしない。
+    await openNode("Sirube をリリースする");
+    expect(findButton("inspector", "地図から外す")).toBeUndefined();
+    expect(findButton("inspector", "このノードを削除")).toBeUndefined();
+
+    findButton("inspector", "その他")!.click();
+    await tick();
+    expect(findButton("inspector", "地図から外す")).toBeTruthy();
+    expect(findButton("inspector", "このノードを削除")).toBeTruthy();
+  });
+
+  test("「その他」の開閉はノードを選び直しても続く", async () => {
+    // ノードごとに畳み直すと、続けて同じ操作をするときに毎回開くことになる。
+    await openNode("Sirube をリリースする");
+    findButton("inspector", "その他")!.click();
+    await tick();
+    await openNode("確定申告");
+    expect(findButton("inspector", "このノードを削除")).toBeTruthy();
+  });
+
+  test("上向きリンクに × を置かない（外すは右クリック）", async () => {
+    await openNode("確定申告");
+    Array.from($("center-body").querySelectorAll("g.graph-node"))
+      .find((g) => (g.textContent ?? "").includes("領収書整理"))!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    expect(text("inspector")).toContain("これを待っている");
+    expect($("inspector").querySelector(".insp-cut")).toBeNull();
+  });
+
+  test("メモは閲覧が既定。「編集」で入力欄になり、「閲覧」で書き戻す", async () => {
+    await openNode("マネタイズ方針を決める"); // サンプルにメモがある
+    expect($("inspector").querySelector(".note-view")).toBeTruthy();
+    expect($("inspector").querySelector(".note-area")).toBeNull();
+    expect(text("inspector")).toContain("Ko-fi");
+
+    findButton("inspector", "編集")!.click();
+    await tick();
+    const area = $("inspector").querySelector(".note-area") as HTMLTextAreaElement;
+    expect(area).toBeTruthy();
+    area.value = "書き換えた";
+
+    findButton("inspector", "閲覧")!.click();
+    await tick();
+    await tick();
+    expect($("inspector").querySelector(".note-area")).toBeNull();
+    expect(text("inspector")).toContain("書き換えた");
+  });
+
+  test("メモが空なら、閲覧モードでもそう言う", async () => {
+    await openNode("READMEとマニュアルを書く");
+    expect(text("inspector")).toContain("まだメモはありません");
+  });
+
+  test("別のノードを開くと編集モードは閉じる", async () => {
+    // 書く顔のまま別のノードに移ると、どれを書いているのか分からなくなる。
+    await openNode("マネタイズ方針を決める");
+    findButton("inspector", "編集")!.click();
+    await tick();
+    expect($("inspector").querySelector(".note-area")).toBeTruthy();
+
+    await openNode("確定申告");
+    expect($("inspector").querySelector(".note-area")).toBeNull();
+  });
+});
+
+describe("右クリックのメニュー", () => {
+  const menu = (): HTMLElement | null => document.querySelector(".ctx-menu");
+  const menuLabels = (): string[] =>
+    Array.from(document.querySelectorAll(".ctx-item")).map((b) => b.textContent ?? "");
+  const menuItem = (label: string): HTMLButtonElement =>
+    Array.from(document.querySelectorAll(".ctx-item")).find((b) =>
+      (b.textContent ?? "").includes(label),
+    ) as HTMLButtonElement;
+  const rightClick = async (target: Element): Promise<MouseEvent> => {
+    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 40 });
+    target.dispatchEvent(ev);
+    await tick();
+    return ev;
+  };
+  const node = (label: string): Element =>
+    Array.from($("center-body").querySelectorAll("g.graph-node")).find((g) =>
+      (g.textContent ?? "").includes(label),
+    )!;
+
+  const openGraph = async (): Promise<void> => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+  };
+
+  test("ノードを右クリックすると、既定のメニューを止めて自前のものを出す", async () => {
+    await openGraph();
+    const ev = await rightClick(node("MVP実装完了"));
+    // 既定を止めていないと、WebView2 の「再読み込み」等が重なって出る
+    expect(ev.defaultPrevented).toBe(true);
+    expect(menuLabels().join(" ")).toContain("達成にする");
+    expect(menuLabels().join(" ")).toContain("前提を一括追加");
+    // 右クリックでも選ぶ。閉じたあとに右のパネルが別のものを指していると、
+    // どれを触ったのか分からなくなる。
+    expect(text("inspector")).toContain("MVP実装完了");
+  });
+
+  test("線を右クリックすると、差し込むと外すが同じ場所に出る", async () => {
+    // 外す側はインスペクタの上向きリンクにホバーしないと出なかった。
+    await openGraph();
+    const ev = await rightClick($("center-body").querySelector(".graph-edge-hit")!);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(menuLabels().join(" ")).toContain("間にノードを差し込む");
+    expect(menuLabels().join(" ")).toContain("を外す");
+  });
+
+  test("メニューから外すと、その繋がりだけが消える", async () => {
+    await openGraph();
+    await rightClick($("center-body").querySelector(".graph-edge-hit")!);
+    menuItem("を外す").click();
+    await tick();
+    await tick();
+    // 押した時点でメニューは閉じる（描き直しの前に閉じないと宙に浮く）
+    expect(menu()).toBeNull();
+    expect(text("toast-stack")).toContain("外しました");
+  });
+
+  test("地の右クリックは作る系だけ", async () => {
+    await openGraph();
+    await rightClick($("center-body").querySelector(".graph-wrap")!);
+    expect(menuLabels().join(" ")).toContain("目的を1つ作る");
+    expect(menuLabels().join(" ")).toContain("まとめて追加");
+    expect(menuLabels().join(" ")).not.toContain("達成");
+  });
+
+  test("地図では降りる口を足す（左クリックは選ぶだけなので）", async () => {
+    await openGraph();
+    Array.from($("breadcrumb").querySelectorAll("button"))
+      .find((b) => b.textContent === "地図")!
+      .click();
+    await tick();
+    await rightClick(node("確定申告"));
+    expect(menuLabels().join(" ")).toContain("グラフで開く");
+  });
+
+  test("Escape と外側のクリックで閉じる", async () => {
+    await openGraph();
+    await rightClick(node("MVP実装完了"));
+    expect(menu()).toBeTruthy();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(menu()).toBeNull();
+
+    await rightClick(node("MVP実装完了"));
+    expect(menu()).toBeTruthy();
+    document.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(menu()).toBeNull();
+  });
+
+  test("削除は載せない（取り消しが無いので、確認のあるインスペクタに残す）", async () => {
+    await openGraph();
+    await rightClick(node("MVP実装完了"));
+    // **「無い」だけを見ない。** メニューごと出ていなくても通ってしまう。
+    expect(menu()).toBeTruthy();
+    expect(menuLabels().join(" ")).not.toContain("削除");
+  });
+});
+
 describe("ゴールの地図（もっと俯瞰）", () => {
   const crumb = (): string => text("breadcrumb");
   const toggle = (label: string): HTMLButtonElement =>
@@ -1753,6 +1955,7 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     ) as HTMLButtonElement;
     row.click();
     await tick();
+    await openMore();
     findButton("inspector", "地図に出す")!.click();
     await tick();
   };
@@ -1762,6 +1965,7 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     // `goal: false` を降格として保存するようにして、外せるようにした（2026-09-11）。
     findButton("root-list", "Sirube をリリースする")!.click();
     await tick();
+    await openMore();
     expect(text("inspector")).toContain("書かなくてもゴールです");
     // 外すと一帯が地図から消えることを、押す前に読める位置に出す
     expect(text("inspector")).toContain("先にそちらを出しておいて");
@@ -1939,6 +2143,7 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     // （のっち報告 2026-09-12）。出せないときは出さない。
     findButton("root-list", "Sirube をリリースする")!.click();
     await tick();
+    await openMore();
     findButton("inspector", "地図から外す")!.click();
     await tick();
     await clickNode("MVP実装完了");

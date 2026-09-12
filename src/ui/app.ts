@@ -5,7 +5,7 @@
 
 import { analyzeCycles, buildReverseIndex, canUndo, hasChildren, inDegree, progress, resolveState, roots, type CycleInfo, type ReverseIndex, type TogglePlan, type ToggleUndo } from "../core/engine.ts";
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
-import { enclosingGoal, goalLayer, mapSeeds, type GoalLayer } from "../core/goals.ts";
+import { enclosingGoal, goalLayer, isGoal, mapSeeds, type GoalLayer } from "../core/goals.ts";
 import { parseDsl } from "../core/dsl.ts";
 import { normalizeForDuplicateCheck, planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
 import { countActionable, nextActions, pathFromRoot, search } from "../core/search.ts";
@@ -13,6 +13,7 @@ import type { SirubeFs } from "../store/fs.ts";
 import { MarkdownGraphStore } from "../store/store.ts";
 import { clear, el, h, iconSpan, stateDot, toast } from "./dom.ts";
 import { hideFlyout } from "./flyout.ts";
+import { closeContextMenu, openContextMenu, type MenuItem, type MenuTarget } from "./context-menu.ts";
 import { renderGraph } from "./graph-view.ts";
 import { resetViewport } from "./graph-viewport.ts";
 import { renderInspector } from "./inspector.ts";
@@ -55,6 +56,11 @@ interface AppState {
    * 目的の入口はこれまでどおり Chain View のままで、俯瞰はそこから切り替える
    * ——入口を差し替えると、分解しに行く導線が1クリック遠くなる。 */
   scopeId?: string;
+  /** 右パネルの開閉。**ノードごとに持たない**——選び直すたびに畳み直すと、
+   *  続けて同じ操作をするときに毎回開くことになる。メモの編集モードだけは
+   *  選び直しで閉じる（別のノードを開いたのに書く顔のままだと、どれを書いて
+   *  いるのか分からなくなる）。 */
+  insp: { moreOpen: boolean; noteEditing: boolean };
   /** 地図に上がる前に居た場所。**「グラフ」で戻る先**（2026-09-12）。
    *
    * 上がって眺めただけなら、降りたときに同じ場所に戻す——入口と出口が違うと
@@ -232,6 +238,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     graph,
     rev: buildReverseIndex(graph),
     cycles: analyzeCycles(graph),
+    insp: { moreOpen: false, noteEditing: false },
     mode: "list",
     layer: "detail",
     goals: goalLayer(graph, buildReverseIndex(graph)),
@@ -705,6 +712,62 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     render();
     // 戻し方まで言う。ここを消したまま忘れると、構造をどう戻すのか分からなくなる。
     toast(`「${parentName}」から「${childName}」を外しました（まとめて追加に「${parentName} -> ${childName}」で戻せます）`);
+  };
+
+  /**
+   * 右クリックのメニュー。**ここにしか無い操作は置かない**——全部どこかにある
+   * ものの近道にする（入口が増えるほど、同じことを2通りで覚えることになる）。
+   *
+   * 削除だけは載せない。取り消しが無く、消すと子が目的として湧く副作用もあるので、
+   * インスペクタの「押してから確認が出る」形のままにしてある。マウスの1動作の
+   * 近くに置くものではない。
+   */
+  const openMenu = (target: MenuTarget, x: number, y: number): void => {
+    hideFlyout();
+    const items: MenuItem[] = [];
+    if (target.kind === "node") {
+      const node = state.graph.nodes[target.id];
+      if (!node) return;
+      // 右クリックでも選ぶ。メニューを閉じたあとに右のパネルが別のものを
+      // 指していると、今どれを触ったのか分からなくなる。
+      select(target.id);
+      const done = resolveState(state.graph, target.id, state.cycles.cyclic) === "SATISFIED";
+      items.push({
+        label: done ? "未達に戻す" : "達成にする",
+        icon: done ? "circleSlash" : "circleCheck",
+        onSelect: () => void toggle(target.id),
+      });
+      items.push({ label: "前提を一括追加", icon: "plus", onSelect: () => openBulkAdd(target.id) });
+      const on = isGoal(state.graph, target.id, state.rev);
+      items.push({
+        label: on ? "地図から外す" : "地図に出す",
+        icon: "compass",
+        onSelect: () => void setGoal(target.id, !on),
+      });
+      // 地図では左クリックが「選ぶ」だけなので、降りる口をここにも置く。
+      // 詳細では押せば潜るので要らない。
+      if (state.layer === "goals") {
+        items.push({ label: "グラフで開く", icon: "layers", onSelect: () => focusFresh(target.id) });
+      }
+    } else if (target.kind === "edge") {
+      const parent = nameOf(target.parentId);
+      const child = nameOf(target.childId);
+      items.push({
+        label: "間にノードを差し込む",
+        icon: "cornerDownRight",
+        onSelect: () => openInsert(target.parentId, target.childId, target.edge),
+      });
+      items.push({
+        label: `「${parent}」から「${child}」を外す`,
+        icon: "x",
+        danger: true,
+        onSelect: () => void detach(target.parentId, target.childId),
+      });
+    } else {
+      items.push({ label: "目的を1つ作る", icon: "plus", onSelect: () => openAdd("one") });
+      items.push({ label: "まとめて追加", icon: "listChecks", onSelect: () => openAdd("bulk") });
+    }
+    openContextMenu(x, y, items);
   };
 
   const saveNote = async (id: string, note: string): Promise<void> => {
@@ -1509,7 +1572,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         state.focusId,
         rev,
         state.cycles.cyclic,
-        { onSelect: select, onDrill: drill, onAscend: ascend, onInsert: openInsert },
+        { onSelect: select, onDrill: drill, onAscend: ascend, onInsert: openInsert, onMenu: openMenu },
         state.selectedId,
         map ? { stateGraph: state.graph, between: state.goals.between, roots: mapSeeds(state.goals) } : undefined,
       );
@@ -1553,13 +1616,27 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     );
   };
 
+  /** 前回描いたときに選んでいたもの。**選び直しの検出をここ1箇所に寄せる**——
+   *  選択を動かす経路は7つある（選ぶ・潜る・戻る・入口から開く・一覧・地図・復元）
+   *  ので、経路ごとに書くと必ずどれかが漏れる。 */
+  let lastSelected: string | undefined = state.selectedId;
+
   const render = (): void => {
     // 描き直しはすべての操作の終点なので、場所の保存もここに1つ置けば足りる。
     savePlace(state);
+    // 別のノードを開いたら、メモは読む顔に戻す。書きかけのものは `blur` で
+    // 保存されるので消えない（保存の経路は編集欄と「閲覧」ボタンの2つだけ）。
+    if (state.selectedId !== lastSelected) {
+      lastSelected = state.selectedId;
+      state.insp.noteEditing = false;
+    }
     // 中身の一覧はホバー元の要素にぶら下がっている。描き直すとその要素ごと
     // 消えるので、ここで閉じる。グラフの描画側だけで閉じていると、一覧へ
     // 切り替えたときに宙に浮いたまま残った（2026-09-02）。
     hideFlyout();
+    // 右クリックのメニューも閉じる。押した項目の側では先に閉じているが、外の
+    // 編集を拾った描き直し（`watchNodes`）で残ることがある。
+    closeContextMenu();
     // 何も選んでいない間はインスペクタごと畳む。起動直後は「どれをやるか選ぶ」
     // 段階で、まだ詳細を見る相手がいない。空のパネルで画面の3割を占めるより、
     // 一覧に幅を渡す方がこの画面の仕事に合っている。
@@ -1588,8 +1665,16 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       onDelete: (id) => void removeNode(id),
       onColor: (id, color) => void setColor(id, color),
       onGoal: (id, on) => void setGoal(id, on),
-      onDetach: (parentId, childId) => void detach(parentId, childId),
-    });
+      onMenu: openMenu,
+      onMore: (open) => {
+        state.insp.moreOpen = open;
+        render();
+      },
+      onNoteEdit: (editing) => {
+        state.insp.noteEditing = editing;
+        render();
+      },
+    }, state.insp);
   };
 
   render();

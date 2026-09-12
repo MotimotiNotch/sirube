@@ -7,6 +7,8 @@ import { inDegree, progress, resolveState, type ReverseIndex } from "../core/eng
 import { isGoal } from "../core/goals.ts";
 import { GOAL_COLORS, isGoalColor, type GoalColor, type Graph, type NodeState } from "../core/model.ts";
 import { COLOR_LABEL, h, iconSpan, stateBadge, stateDot } from "./dom.ts";
+import type { MenuTarget } from "./context-menu.ts";
+import { renderNote } from "./note-view.ts";
 
 export interface InspectorCallbacks {
   onToggle(id: string): void;
@@ -25,8 +27,21 @@ export interface InspectorCallbacks {
   onColor(id: string, color: GoalColor | undefined): void;
   /** ゴールとして浮上させる／やめる。 */
   onGoal(id: string, on: boolean): void;
-  /** `parentId` から選択中のノードへの繋がりだけを切る（ノードは残す）。 */
-  onDetach(parentId: string, childId: string): void;
+  /** 右クリック。**外す（`detach`）の入口はここへ移した**（2026-09-12）——
+   *  以前は行にホバーすると出る `×` で、置いてあるだけで目に入るわりに
+   *  「押すと何が消えるのか」はツールチップを読むまで分からなかった。 */
+  onMenu(target: MenuTarget, x: number, y: number): void;
+  /** 末尾の「その他」を開く／畳む。 */
+  onMore(open: boolean): void;
+  /** メモを編集モードにする／戻す。 */
+  onNoteEdit(editing: boolean): void;
+}
+
+/** パネルが覚えている開閉。**ノードごとではなくパネルごと**——選び直すたびに
+ *  畳み直すと、続けて同じ操作をするときに毎回開くことになる。 */
+export interface InspectorView {
+  moreOpen: boolean;
+  noteEditing: boolean;
 }
 
 export function renderInspector(
@@ -36,6 +51,7 @@ export function renderInspector(
   rev: ReverseIndex,
   cyclic: ReadonlySet<string>,
   cb: InspectorCallbacks,
+  view: InspectorView = { moreOpen: false, noteEditing: false },
 ): void {
   container.replaceChildren();
 
@@ -125,6 +141,24 @@ export function renderInspector(
     container.append(warn);
   }
 
+  // 「その他」。**たまにしか押さないが、押す前に読ませたい説明があるもの**を
+  // ここへ畳む（2026-09-12、のっち「右のパネルも整理できるね」）。畳めるように
+  // なったのは、日々のゴール切り替えが右クリックでも届くようになったため。
+  // 中身は「ゴール（地図に出す・外す）」と「削除」の2つ。
+  const more = h("div", { class: "insp-more" });
+  const moreBody = h("div", { class: "insp-more-body" });
+  const moreBtn = h("button", {
+    class: `insp-more-btn${view.moreOpen ? " open" : ""}`,
+    type: "button",
+    "aria-expanded": view.moreOpen ? "true" : "false",
+  });
+  moreBtn.append(iconSpan("chevronRight", 12), "その他");
+  moreBtn.addEventListener("click", () => cb.onMore(!view.moreOpen));
+  // 畳んでいるときは**中身を作らない**（`display:none` で隠さない）。隠すだけだと
+  // 「画面に無いのに探すと見つかる」ものになり、テストからも人からも同じに見えない。
+  more.append(moreBtn);
+  if (view.moreOpen) more.append(moreBody);
+
   // ゴール宣言。**中腹を地図へ浮上させる1ビット**（2026-09-11）。
   //
   // 実データで目的が1つに畳まれ、64ノードが根から11段下までぶら下がった。
@@ -158,7 +192,7 @@ export function renderInspector(
         ? "地図から外してあります。構造はそのままで、地図と入口に出ないだけです。"
         : "地図に出したいときに押します。構造は変わりません（状態も進捗もそのまま）。";
     sec.append(h("p", { class: "insp-note" }, [note]));
-    container.append(sec);
+    moreBody.append(sec);
   }
 
   // 付箋。**ゴールにだけ貼れる。**
@@ -203,6 +237,7 @@ export function renderInspector(
     title: string,
     iconName: Parameters<typeof iconSpan>[0],
     ids: string[],
+    edge: "requires" | "contains",
   ): void => {
     if (ids.length === 0) return;
     const sec = h("div", { class: "insp-section" });
@@ -218,18 +253,16 @@ export function renderInspector(
       btn.append(h("span", {}, [child?.name ?? `${id}（未作成）`]));
       btn.addEventListener("click", () => cb.onFocus(id));
 
-      // この繋がりだけを切る。**確認は挟まない**——ノードは残るし、戻すのは
-      // 「まとめて追加」に1行書くだけで済む（既存の名前を書けばそこへ繋がる）。
-      // 代わりにホバーで出す形にして、置いてあるだけで押される事故を避ける。
-      const cut = h("button", {
-        class: "icon-btn insp-cut",
-        type: "button",
-        title: `${child?.name ?? id} との繋がりを外す（ノードは残る）`,
+      // この繋がりだけを切る口は**右クリック**へ移した（2026-09-12）。ホバーで
+      // 出る `×` は、押すと何が消えるのかがツールチップを読むまで分からず、
+      // 行の右端を常に1つ占めていた。グラフの線と同じメニューが出るので、
+      // 「外す」の覚え方が1つになる。
+      row.addEventListener("contextmenu", (ev) => {
+        ev.preventDefault();
+        cb.onMenu({ kind: "edge", parentId: id, childId: selectedId, edge }, ev.clientX, ev.clientY);
       });
-      cut.append(iconSpan("x", 12));
-      cut.addEventListener("click", () => cb.onDetach(id, selectedId));
 
-      row.append(btn, cut);
+      row.append(btn);
       list.append(row);
     }
     sec.append(list);
@@ -242,20 +275,45 @@ export function renderInspector(
   // 上向きは Chain View に無いので残す。グラフは下向きしか描かず、パンくずは
   // 自分が辿ってきた道しか持たないため、親が複数ある合流ノードでは
   // ここを消すと他の親に到達できなくなる。
-  linkList("これを待っている", "listChecks", rev.requiredBy.get(selectedId) ?? []);
-  linkList("属する先", "chevronRight", rev.containedBy.get(selectedId) ?? []);
+  linkList("これを待っている", "listChecks", rev.requiredBy.get(selectedId) ?? [], "requires");
+  linkList("属する先", "chevronRight", rev.containedBy.get(selectedId) ?? [], "contains");
 
-  // メモ（Markdown 本文そのもの。Obsidian で開いても同じものが見える）
+  // メモ（Markdown 本文そのもの。Obsidian で開いても同じものが見える）。
+  //
+  // **既定は閲覧**（2026-09-12、のっち依頼）。読む時間の方が長い道具で、将来は
+  // ここに他の人のコメントが積まれていく。入力欄を出しっぱなしにすると、
+  // パネルで一番大きい塊が常に「書く顔」になる。
   const noteSec = h("div", { class: "insp-section" });
   const noteHead = h("h4");
   noteHead.append(iconSpan("pencil", 12), "メモ");
+  const modeBtn = h("button", { class: "insp-mode-btn", type: "button" }, [view.noteEditing ? "閲覧" : "編集"]);
+  noteHead.append(modeBtn);
   noteSec.append(noteHead);
-  const area = h("textarea", { class: "note-area", placeholder: "このノードについてのメモ" }) as HTMLTextAreaElement;
-  area.value = node.note;
-  area.addEventListener("blur", () => {
-    if (area.value !== node.note) cb.onNoteChange(selectedId, area.value);
-  });
-  noteSec.append(area);
+  if (view.noteEditing) {
+    const area = h("textarea", { class: "note-area", placeholder: "このノードについてのメモ" }) as HTMLTextAreaElement;
+    area.value = node.note;
+    const commit = (): void => {
+      if (area.value !== node.note) cb.onNoteChange(selectedId, area.value);
+    };
+    area.addEventListener("blur", commit);
+    // 閲覧へ戻すときも書き戻す。**押す順で保存が変わらないようにする**——
+    // ボタンを押すと blur も走るが、経路によって先後が入れ替わるので、
+    // どちらからも同じ関数を通す（変化が無ければ何もしない）。
+    modeBtn.addEventListener("click", () => {
+      commit();
+      cb.onNoteEdit(false);
+    });
+    noteSec.append(area);
+  } else {
+    modeBtn.addEventListener("click", () => cb.onNoteEdit(true));
+    if (node.note.trim() === "") {
+      noteSec.append(h("p", { class: "insp-note" }, ["まだメモはありません。「編集」で書けます。"]));
+    } else {
+      const body = h("div", { class: "note-view" });
+      renderNote(body, node.note);
+      noteSec.append(body);
+    }
+  }
   container.append(noteSec);
 
   // 削除は押した瞬間に消え、参照の掃除まで走る。取り消しも無いので、その場で
@@ -292,5 +350,8 @@ export function renderInspector(
     delBox.append(row);
   });
   delBox.append(del);
-  container.append(delBox);
+  moreBody.append(delBox);
+
+  // 「その他」はパネルの一番下。畳んであるので、開かない限り1行しか取らない。
+  container.append(more);
 }

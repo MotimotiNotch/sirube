@@ -793,6 +793,43 @@ body.no-inspector #inspector-resizer {
 }
 .fly-tag { flex: none; color: var(--fg-faint); font-size: 10px; }
 
+/* --- 右クリックのメニュー ------------------------------------------------ */
+
+/* 画面に固定して置く（グラフは変換で動くので、中に入れると一緒に動く）。
+   凡例と同じ理由で**不透明**——下にノードや線が透けると、項目の文字と
+   グラフの線が重なって読めない。 */
+.ctx-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 168px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ctx-item .icon { color: var(--fg-faint); flex: none; }
+.ctx-item:hover { background: var(--bg-sunken); }
+/* 外す系。**色だけで区別する**——確認を挟むほどではないが、隣の項目と
+   同じ顔で並ぶと押し間違える。色は `.btn.danger` と同じ値にしてある
+   （トークンが無いので増やさない。変えるときは2箇所）。 */
+.ctx-item.danger { color: #b3261e; }
+
 /* --- インスペクタ -------------------------------------------------------- */
 
 .insp-empty { color: var(--fg-faint); padding-top: 40px; text-align: center; }
@@ -828,20 +865,9 @@ body.no-inspector #inspector-resizer {
   gap: 5px;
 }
 .insp-list { display: flex; flex-direction: column; gap: 4px; }
-/* 上向きリンクの行。名前を押すとそこへ移り、× でその繋がりだけを切る。 */
+/* 上向きリンクの行。名前を押すとそこへ移る。外すのは右クリック（2026-09-12）。 */
 .insp-link-row { display: flex; align-items: center; gap: 2px; }
 .insp-link-row .insp-link { flex: 1 1 auto; min-width: 0; }
-/* × は**ホバーで出す**。常時置くと、置いてあるだけで押される。切る操作に
-   確認モーダルを挟まない代わりに、出し方の方で事故を減らしている。 */
-.insp-cut {
-  flex: 0 0 auto;
-  opacity: 0;
-  color: var(--fg-faint);
-}
-.insp-link-row:hover .insp-cut { opacity: 1; }
-.insp-cut:hover { color: #b3261e; }
-/* キーボードで辿る人にも出す。ホバーだけを頼りにすると触れなくなる。 */
-.insp-cut:focus-visible { opacity: 1; }
 .insp-link {
   display: flex;
   align-items: center;
@@ -872,6 +898,92 @@ body.no-inspector #inspector-resizer {
   padding: 8px;
   font: inherit;
 }
+
+/* 「その他」。畳んであるときは1行しか取らない。 */
+.insp-more { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 8px; }
+.insp-more-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 4px 2px;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.insp-more-btn:hover { color: var(--fg); }
+/* 開いている間は印を下向きに。開閉のどちらなのかを、文字を足さずに言う。 */
+.insp-more-btn.open .icon { transform: rotate(90deg); }
+.insp-more-body .insp-section:first-child { margin-top: 10px; }
+
+/* メモの閲覧・編集の切り替え。見出しの右端に置く。 */
+.insp-mode-btn {
+  margin-left: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  padding: 1px 8px;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+}
+.insp-mode-btn:hover { color: var(--fg); border-color: var(--fg-faint); }
+
+/* メモの閲覧モード。**本文が主役なので、装飾は最小限にする**——ここで
+   Obsidian の見た目を真似ると、似ているのに違うものが2つになる。 */
+.note-view { font-size: 13px; line-height: 1.7; word-break: break-word; }
+.note-view .note-p { margin: 0 0 8px; }
+.note-view .note-h { font-weight: 600; margin: 12px 0 6px; }
+.note-view .note-h1 { font-size: 15px; }
+.note-view .note-h2 { font-size: 14px; }
+.note-view .note-h3 { font-size: 13px; color: var(--fg-muted); }
+.note-view .note-list { margin: 0 0 8px; padding-left: 20px; }
+.note-view .note-li-in { margin-left: 14px; }
+.note-view .note-quote {
+  margin: 0 0 8px;
+  padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--fg-muted);
+}
+.note-view .note-code {
+  margin: 0 0 8px;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: pre;
+}
+.note-view code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  font-size: 12px;
+}
+.note-view .note-hr { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
+.note-view .note-table { border-collapse: collapse; margin: 0 0 8px; font-size: 12px; }
+.note-view .note-table th,
+.note-view .note-table td { border: 1px solid var(--border); padding: 3px 7px; text-align: left; }
+.note-view .note-table th { background: var(--bg-sunken); }
+/* チェックボックスは**印だけ**（メモの中から達成は動かせない）。 */
+.note-view .note-box {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border: 1px solid var(--fg-faint);
+  border-radius: 2px;
+  vertical-align: baseline;
+}
+.note-view .note-box.on { background: var(--st-satisfied); border-color: var(--st-satisfied); }
 
 .progress-bar {
   height: 6px;

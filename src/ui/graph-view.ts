@@ -10,6 +10,7 @@ import { isGoalColor, type Graph, type NodeState } from "../core/model.ts";
 import type { ReverseIndex } from "../core/engine.ts";
 import { descendantProgress, hasChildren, resolveState } from "../core/engine.ts";
 import { betweenKey } from "../core/goals.ts";
+import { closeContextMenu, type MenuTarget } from "./context-menu.ts";
 import { hideFlyout, scheduleHideFlyout, showOutlineFlyout } from "./flyout.ts";
 import { consumeDragEnd, mountViewport } from "./graph-viewport.ts";
 import { mountLegend } from "./legend.ts";
@@ -76,6 +77,8 @@ export interface GraphViewCallbacks {
   onAscend(id: string): void;
   /** エッジを押した。その2つの**間に**新しいノードを差し込む。 */
   onInsert(parentId: string, childId: string, kind: "requires" | "contains"): void;
+  /** 右クリック。ビューポート座標をそのまま渡す。 */
+  onMenu(target: MenuTarget, x: number, y: number): void;
 }
 
 /**
@@ -357,6 +360,13 @@ export function renderGraph(
     // 強調は当たり判定に乗ったときだけにする。
     hit.addEventListener("mouseenter", () => path.classList.add("hover"));
     hit.addEventListener("mouseleave", () => path.classList.remove("hover"));
+    // 線の上の右クリック。差し込むと外すはどちらも線に対する操作なので、
+    // ここに両方置けると往復が消える（外す側はインスペクタにしか無かった）。
+    hit.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      cb.onMenu({ kind: "edge", parentId: e.from, childId: e.to, edge: e.kind }, ev.clientX, ev.clientY);
+    });
     view.append(hit);
   }
 
@@ -538,6 +548,11 @@ export function renderGraph(
     // ぶん、起点の配下こそ一覧が要る。
     // 線の強調は全ノードに付ける。フライアウト（下にあるものの一覧）は
     // 子があるときだけなので、条件を分けてある。
+    g.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      cb.onMenu({ kind: "node", id: b.id }, ev.clientX, ev.clientY);
+    });
     g.addEventListener("mouseenter", () => highlightEdges(b.id));
     g.addEventListener("mouseleave", () => highlightEdges(undefined));
     // 地図ではフライアウトを出さない。中身の一覧から潜ると**非ゴールへ飛ぶ**
@@ -556,6 +571,12 @@ export function renderGraph(
   // 子が無いときは表示窓を伸ばさない。動かすものが無い上に、案内文が
   // ペインの下端まで押し出されてノードから離れてしまう。
   wrap.className = `graph-wrap${alone ? " short" : ""}`;
+  // グラフの地。ノードと線は上で `stopPropagation` しているので、ここへ来るのは
+  // 本当に何も無いところを押したときだけ。
+  wrap.addEventListener("contextmenu", (ev) => {
+    ev.preventDefault();
+    cb.onMenu({ kind: "space" }, ev.clientX, ev.clientY);
+  });
   wrap.append(svg);
   container.append(wrap);
   // 表示窓の寸法が要るので、DOM へ入れてから配線する。
@@ -569,7 +590,11 @@ export function renderGraph(
     viewKey: overview ? MAP_VIEW_KEY : focusId!,
     contentW: totalW,
     contentH: totalH,
-    onInteract: hideFlyout,
+    // 掴んで動かすと、開いていたものは全部位置がずれる。追従させるより閉じる。
+    onInteract: () => {
+      hideFlyout();
+      closeContextMenu();
+    },
   });
   // 凡例は表示窓ではなくペインに置く。窓は子が無いと 140px に縮むので、
   // 窓基準だと「！」がノードの隣あたりまで上がってきて、開くたびに高さが違う。
