@@ -171,3 +171,38 @@ export function enclosingGoal(g: Graph, id: string, rev: ReverseIndex): string |
   }
   return undefined;
 }
+
+/**
+ * 地図の描き出し点。**根（他のどのゴールからも辿り着けないゴール）＋そこから
+ * 届かないゴール。**
+ *
+ * 地図は根1本ぶんではなく**全体を1枚**で描く（2026-09-12）。焦点から下だけを
+ * 描いていた頃は、根が増えた瞬間に画面が丸1つになっていた——実データで、
+ * 終わらない根2本を降格した直後に根が6本へ増え、**10件のゴールのうち5件では
+ * 地図に自分1つしか出なかった**。「地図」を押しても絵が変わらないので、
+ * 何が起きたのか分からない。
+ *
+ * 後半（届かないゴール）が要るのは、**ゴール同士が輪になっていると根が1つも
+ * 無くなる**ため。輪は「分解が足りない信号」として残す方針なので、そこだけ
+ * 地図が空になる経路を作らない。並びは名前順に固定する——開くたびに違う順で
+ * 並ぶと、同じ地図に見えない。
+ */
+export function mapSeeds(layer: GoalLayer): string[] {
+  const byName = (a: string, b: string): number =>
+    layer.graph.nodes[a]!.name.localeCompare(layer.graph.nodes[b]!.name, "ja") || a.localeCompare(b);
+  const seeds = goalRoots(layer).sort(byName);
+  const reached = new Set<string>(seeds);
+  let frontier = [...seeds];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const cid of layer.graph.nodes[id]?.requires ?? []) {
+        if (reached.has(cid)) continue;
+        reached.add(cid);
+        next.push(cid);
+      }
+    }
+    frontier = next;
+  }
+  return [...seeds, ...layer.ids.filter((id) => !reached.has(id)).sort(byName)];
+}

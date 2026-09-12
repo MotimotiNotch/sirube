@@ -1734,6 +1734,12 @@ describe("ゴールの地図（もっと俯瞰）", () => {
   /** パンくずの切り替えは2打目を 400ms 飲む（同じ位置に逆向きのボタンが出るため）。
    *  往復を試すテストは、その窓を跨いでから押す。 */
   const pastGuard = (): Promise<void> => new Promise((r) => setTimeout(r, 420));
+  const clickNode = async (label: string): Promise<void> => {
+    Array.from($("center-body").querySelectorAll("g.graph-node"))
+      .find((g) => (g.textContent ?? "").includes(label))!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+  };
 
   /** `Tauriシェル` をゴールに立てる。`Sirube をリリースする` からは
    *  `MVP実装完了` を1つ挟んだ先にいるので、畳んだ件数の検査にも使える。 */
@@ -1766,18 +1772,59 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     expect(text("inspector")).toContain("地図から外してあります");
   });
 
-  test("地図へ上がると、今いる場所を包む一番近いゴールが中心になる", async () => {
-    // 根から出し直さない。深いところで作業していた人が上がるたびに全体図を
-    // 見せられると、自分がどこに居たのか分からなくなる。
+  test("地図へ上がると、今いる場所を包む一番近いゴールが現在地になる", async () => {
+    // 全体を出しても、自分がどこに居たのかは要る。深いところで作業していた人に
+    // 印の無い全体図を見せると、迷子の逆になる。
     await declareTauriGoal();
     toggle("地図").click();
     await tick();
-    // 立てた本人がゴールなので、その場で中心になる
+    // 立てた本人がゴールなので、その場が現在地
     expect(crumb()).toContain("Tauriシェル");
     expect($("breadcrumb").querySelector(".crumb-layer")).toBeTruthy();
+    expect(($("center-body").querySelector(".graph-node.focused")?.textContent ?? "")).toContain("Tauriシェル");
   });
 
-  test("地図で中心のゴールを押しても、地図から落ちない", async () => {
+  test("地図は根が何本あっても1枚に出す", async () => {
+    // 焦点から下だけを描いていた頃は、根が増えた瞬間に丸1つの画面になった
+    // （実データで、終わらない根2本を降格した直後に10件中5件がそうなった）。
+    // **押しても絵が変わらないので、何が起きたのか分からない。**
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    toggle("地図").click();
+    await tick();
+    const labels = mapLabels();
+    expect(labels).toContain("Sirube をリリースする");
+    expect(labels).toContain("確定申告");
+    expect(labels).toContain("ポートフォリオを公開する");
+  });
+
+  test("地図でゴールを押すと、絵は変わらず現在地だけ移る", async () => {
+    // 地図は全体で1枚なので、潜って中心を移す意味が無い。動くのは現在地と
+    // 「グラフ」で降りる先だけ——押すたびに絵が組み替わると、地図として読めない。
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    toggle("地図").click();
+    await tick();
+    const before = mapLabels();
+
+    Array.from($("center-body").querySelectorAll("g.graph-node"))
+      .find((g) => (g.textContent ?? "").includes("確定申告"))!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+
+    expect(mapLabels()).toEqual(before);
+    expect($("breadcrumb").querySelector(".crumb-layer")).toBeTruthy();
+    expect(crumb()).toContain("確定申告");
+    expect(text("inspector")).toContain("確定申告");
+
+    // 選んだゴールが「グラフ」の降り先になる
+    await pastGuard();
+    toggle("グラフ").click();
+    await tick();
+    expect(mapLabels()).toContain("領収書整理");
+  });
+
+  test("地図で現在地のゴールを押しても、地図から落ちない", async () => {
     // 「押すと1つ戻る」を足したときの足元の穴。地図に上がると道は空になるので、
     // 戻り先が無い。ここで TOP へ出したり、グラフへ降りたりすると、
     // **押した覚えのない縮尺に落ちる**。
@@ -1804,7 +1851,7 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     toggle("地図").click();
     await tick();
 
-    // 中心は、今いた場所を包む一番近いゴール
+    // 現在地は、今いた場所を包む一番近いゴール
     expect(crumb()).toContain("地図");
     expect(crumb()).toContain("Sirube をリリースする");
     const labels = mapLabels();
@@ -1865,6 +1912,69 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     await tick();
     expect($("breadcrumb").querySelector(".crumb-layer")).toBeNull();
     expect(mapLabels()).toContain("領収書整理");
+  });
+
+  test("ゴールを選ばずに降りると、上がる前の場所へ戻る", async () => {
+    // 眺めて降りただけなら、入ったところから出る。ここが効かないと、上がる前より
+    // 浅い場所に降ろされる（実データで66ノード中54、平均2.4段ぶん）。
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    await clickNode("MVP実装完了");
+    await clickNode("Markdownノードストア");
+    const before = crumb();
+
+    toggle("地図").click();
+    await tick();
+    await pastGuard();
+    toggle("グラフ").click();
+    await tick();
+
+    expect(crumb()).toBe(before);
+    expect(mapLabels()).toContain("新リポジトリを作る");
+  });
+
+  test("上にゴールが無い場所から上がると、現在地を出さない", async () => {
+    // 降格した根の下には、包むゴールが1つも無い。以前はここで id の若い順に
+    // 選んでいたので、**無関係なゴールに「今ここ」の印が付いていた**
+    // （のっち報告 2026-09-12）。出せないときは出さない。
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    findButton("inspector", "地図から外す")!.click();
+    await tick();
+    await clickNode("MVP実装完了");
+
+    toggle("地図").click();
+    await tick();
+    expect($("breadcrumb").querySelector(".crumb-layer")).toBeTruthy();
+    expect(crumb()).toContain("全体");
+    expect($("center-body").querySelector(".graph-node.focused")).toBeNull();
+    // 地図そのものは出ている（降格していない目的が並ぶ）
+    expect(mapLabels()).toContain("確定申告");
+
+    // 何も選んでいないので、降りると上がる前の場所へ戻る
+    await pastGuard();
+    toggle("グラフ").click();
+    await tick();
+    expect(crumb()).toContain("MVP実装完了");
+  });
+
+  test("凡例は縮尺で差し替わる（地図では点線と線の上の数字）", async () => {
+    // 地図の線は縮約で1種類に畳まれた点線なのに、凡例は実線＝前提／破線＝内包を
+    // 出したままだった。**画面に無いものを説明し、出ている数字を説明していない**
+    // （のっち「エッジの数字ってなに？」2026-09-12）。
+    const legend = (): string => $("center-body").querySelector(".legend-panel")?.textContent ?? "";
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    expect(legend()).toContain("これで構成（内包）");
+    expect(legend()).toContain("何箇所から要求されているか");
+    expect(legend()).not.toContain("畳んだ件数");
+
+    toggle("地図").click();
+    await tick();
+    expect(legend()).toContain("この先にあるゴール");
+    expect(legend()).toContain("間に畳んだ件数");
+    expect(legend()).toContain("いくつのゴールがここを通るか");
+    expect(legend()).not.toContain("これで構成（内包）");
   });
 
   test("付箋はゴールに貼れる（目的が1本に畳まれても死なない）", async () => {

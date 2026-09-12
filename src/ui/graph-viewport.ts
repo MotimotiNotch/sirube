@@ -6,9 +6,10 @@
 // 変換行列に寄せる**——描画そのものは触らず、内容を包む `<g>` の transform
 // だけを動かす。
 //
-// 拡大率と位置はフォーカスノードごとに保つ。達成をトグルしただけで描き直しが
+// 拡大率と位置は**絵ごと**に保つ（`viewKey`）。達成をトグルしただけで描き直しが
 // 走るので、そのたびに表示が初期位置へ戻ると手元が飛ぶ。潜って別のノードへ
-// 移ったときだけリセットする。
+// 移ったときだけリセットする。鍵をノード id にしていたが、地図は**どのゴールを
+// 選んでいても同じ1枚**なので、そこだけ固定の鍵を渡している（2026-09-12）。
 
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 3;
@@ -28,7 +29,7 @@ const PINCH_SENSITIVITY = 0.01;
 const DRAG_SLOP_PX = 4;
 
 interface ViewportState {
-  focusId: string;
+  key: string;
   k: number;
   tx: number;
   ty: number;
@@ -72,7 +73,9 @@ export interface MountViewportOptions {
   /** 拡大率（リセット）ボタンの置き場。表示窓は子が無いと 140px に縮むので、
    *  そこに置くと隅の高さがノードの並びで動く。凡例と同じくペインへ固定する。 */
   host: HTMLElement;
-  focusId: string;
+  /** この絵を指す鍵。**変わるとリセット**する。詳細はフォーカスノードの id、
+   *  地図は1枚ぶんの固定値（`graph-view.ts` の `MAP_VIEW_KEY`）。 */
+  viewKey: string;
   contentW: number;
   contentH: number;
   /** ドラッグ・拡大縮小の最中に開いていると位置がずれるものを閉じる。 */
@@ -86,7 +89,7 @@ export interface MountViewportOptions {
  * （要素と一緒に捨てられる）。持ち越すのは変換の値だけ。
  */
 export function mountViewport(opts: MountViewportOptions): void {
-  const { wrap, view, host, focusId, contentW, contentH, onInteract } = opts;
+  const { wrap, view, host, viewKey, contentW, contentH, onInteract } = opts;
 
   const vw = wrap.clientWidth;
   const vh = wrap.clientHeight;
@@ -99,8 +102,8 @@ export function mountViewport(opts: MountViewportOptions): void {
   const ty = contentH < vh ? (vh - contentH) / 2 : 0;
   const base = { k: 1, tx: (vw - contentW) / 2, ty };
 
-  if (!current || current.focusId !== focusId) {
-    current = { focusId, ...base, base };
+  if (!current || current.key !== viewKey) {
+    current = { key: viewKey, ...base, base };
   } else {
     // 同じノードを描き直しただけ。ペイン幅が変わっていることはあるので
     // リセット先だけ更新する。

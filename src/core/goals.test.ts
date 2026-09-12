@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { buildReverseIndex, resolveState } from "./engine.ts";
-import { betweenKey, enclosingGoal, goalIds, goalLayer, goalRoots, isGoal } from "./goals.ts";
+import { betweenKey, enclosingGoal, goalIds, goalLayer, goalRoots, isGoal, mapSeeds } from "./goals.ts";
 import { parseDsl } from "./dsl.ts";
 import { newGraph, type Graph } from "./model.ts";
 
@@ -135,6 +135,25 @@ describe("縮約（ゴールだけの地図）", () => {
 
     expect(resolveState(graph, "B", new Set())).toBe("BLOCKED");
     expect(resolveState(layer.graph, "B", new Set())).toBe("ACTIONABLE");
+  });
+});
+
+describe("地図の描き出し点", () => {
+  test("根を名前順に返す（開くたびに同じ地図に見えるようにする）", () => {
+    const graph = g("絵で表明する -> 絵を1枚描く, 写真で表明する -> 写真を1枚撮る, 記事で表明する -> 記事を1本書く");
+    const layer = goalLayer(graph, rev(graph));
+    expect(mapSeeds(layer)).toEqual(["絵で表明する", "記事で表明する", "写真で表明する"]);
+  });
+
+  test("ゴール同士が輪になっていても描き出し点が消えない", () => {
+    // 陽性対照。**根は0本になる**——そこで諦めると地図が真っ白になる。
+    const graph = g("A -> B -> A");
+    graph.nodes["A"]!.goal = true;
+    graph.nodes["B"]!.goal = true;
+    const layer = goalLayer(graph, rev(graph));
+
+    expect(goalRoots(layer)).toEqual([]);
+    expect(mapSeeds(layer)).toEqual(["A", "B"]);
   });
 });
 

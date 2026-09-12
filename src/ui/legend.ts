@@ -28,16 +28,36 @@ function markSample(state: NodeState): SVGSVGElement {
   return svg;
 }
 
-/** 線の見本（実線＝前提／破線＝内包）。 */
-function edgeSample(kind: "requires" | "contains"): SVGSVGElement {
+/** 線の見本（実線＝前提／破線＝内包／点線＝地図）。 */
+function edgeSample(kind: "requires" | "contains" | "goal"): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("width", "22");
   svg.setAttribute("height", "22");
   svg.setAttribute("class", "legend-mark");
   const path = document.createElementNS(SVG_NS, "path");
   path.setAttribute("d", "M 2 11 L 20 11");
-  path.setAttribute("class", `graph-edge ${kind === "contains" ? "contains" : ""}`.trim());
+  path.setAttribute("class", `graph-edge ${kind === "requires" ? "" : kind}`.trim());
   svg.append(path);
+  return svg;
+}
+
+/** 線の上に出る数字の見本（地図で畳んだ件数）。**本物と同じ組み合わせで描く**
+ *  ——点線の上に数字が乗っている、という形そのものが説明になる。 */
+function betweenSample(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "22");
+  svg.setAttribute("height", "22");
+  svg.setAttribute("class", "legend-mark");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", "M 2 15 L 20 15");
+  path.setAttribute("class", "graph-edge goal");
+  const t = document.createElementNS(SVG_NS, "text");
+  t.setAttribute("class", "edge-between");
+  t.setAttribute("x", "11");
+  t.setAttribute("y", "12");
+  t.setAttribute("text-anchor", "middle");
+  t.textContent = "2";
+  svg.append(path, t);
   return svg;
 }
 
@@ -79,19 +99,29 @@ function row(sample: SVGSVGElement, label: string): HTMLElement {
  * ホバーで開き、クリックで固定できる。ホバーだけだと読んでいる途中に手が
  * ずれて閉じるし、クリックだけだと「そこに説明がある」ことに気づけない。
  */
-export function mountLegend(host: HTMLElement): void {
+export function mountLegend(host: HTMLElement, map = false): void {
   const panel = h("div", { class: "legend-panel hidden" });
   const states: NodeState[] = ["ACTIONABLE", "BLOCKED", "SATISFIED", "CYCLIC"];
   for (const state of states) panel.append(row(markSample(state), STATE_LABEL[state]));
   panel.append(h("div", { class: "legend-sep" }, []));
-  panel.append(row(edgeSample("requires"), "これが必要（前提）"));
-  panel.append(row(edgeSample("contains"), "これで構成（内包）"));
+  // **線の説明は縮尺で差し替える**（2026-09-12、のっち報告「エッジの数字ってなに？」）。
+  // 地図の線は縮約で1種類に畳まれた点線なのに、凡例は実線＝前提／破線＝内包を
+  // 出したままだった。**画面に無いものを説明し、出ている数字を説明していない。**
+  if (map) {
+    panel.append(row(edgeSample("goal"), "この先にあるゴール"));
+    panel.append(row(betweenSample(), "線の上の数字は、間に畳んだ件数"));
+  } else {
+    panel.append(row(edgeSample("requires"), "これが必要（前提）"));
+    panel.append(row(edgeSample("contains"), "これで構成（内包）"));
+  }
   panel.append(h("div", { class: "legend-sep" }, []));
   panel.append(row(ringSample(), "下にあるものの進み具合"));
   panel.append(
     h("div", { class: "legend-row" }, [
       h("span", { class: "legend-mark legend-merge" }, ["2"]),
-      h("span", {}, ["何箇所から要求されているか"]),
+      // 入次数の読み方も縮尺で変わる。詳細では優先度（片付けると何個進むか）、
+      // 地図では通り道の数。ノードのツールチップと同じ言い方に揃える。
+      h("span", {}, [map ? "いくつのゴールがここを通るか" : "何箇所から要求されているか"]),
     ]),
   );
 

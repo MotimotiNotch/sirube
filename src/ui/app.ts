@@ -5,7 +5,7 @@
 
 import { analyzeCycles, buildReverseIndex, canUndo, hasChildren, inDegree, progress, resolveState, roots, type CycleInfo, type ReverseIndex, type TogglePlan, type ToggleUndo } from "../core/engine.ts";
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
-import { enclosingGoal, goalLayer, goalRoots, type GoalLayer } from "../core/goals.ts";
+import { enclosingGoal, goalLayer, mapSeeds, type GoalLayer } from "../core/goals.ts";
 import { parseDsl } from "../core/dsl.ts";
 import { normalizeForDuplicateCheck, planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
 import { countActionable, nextActions, pathFromRoot, search } from "../core/search.ts";
@@ -55,6 +55,25 @@ interface AppState {
    * 目的の入口はこれまでどおり Chain View のままで、俯瞰はそこから切り替える
    * ——入口を差し替えると、分解しに行く導線が1クリック遠くなる。 */
   scopeId?: string;
+  /** 地図に上がる前に居た場所。**「グラフ」で戻る先**（2026-09-12）。
+   *
+   * 上がって眺めただけなら、降りたときに同じ場所に戻す——入口と出口が違うと
+   * 往復にならない（実データで66ノード中54、平均2.4段ぶん上がった所へ降りていた）。
+   * 地図でゴールを選んだらそちらが勝つ。**選ぶのは「降りる先を決める」操作**で、
+   * それを無視して元の場所へ戻すと、選んだ意味が消える。
+   *
+   * 保存はしない（localStorage へ入れない）。アプリを閉じて開き直すのは往復では
+   * ないので、そのときは地図に居た場所から普通に降りればいい。 */
+  mapReturn?: MapReturn;
+}
+
+/** 地図へ上がる前の居場所。 */
+interface MapReturn {
+  focusId?: string;
+  trail: string[];
+  selectedId?: string;
+  /** 地図でゴールを選んだか。選んでいればそこへ降りる。 */
+  picked: boolean;
 }
 
 export interface AppHandle {
@@ -166,6 +185,13 @@ function restorePlace(state: AppState): void {
   const alive = (id: unknown): id is string => typeof id === "string" && state.graph.nodes[id] !== undefined;
   state.trail = Array.isArray(saved.trail) ? saved.trail.filter(alive) : [];
 
+  // 現在地の無い地図。焦点が無くても地図は成り立つので、縮尺だけ戻す。
+  if (saved.mode === "graph" && saved.layer === "goals" && !alive(saved.focusId)) {
+    state.mode = "graph";
+    state.layer = "goals";
+    state.trail = [];
+    return;
+  }
   if (saved.mode === "graph" && alive(saved.focusId)) {
     state.mode = "graph";
     // 縮尺は焦点が地図に載っているときだけ戻す。ゴールでなくなっていたら
@@ -325,6 +351,15 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
 
   const select = (id: string): void => {
     state.selectedId = id;
+    // **地図では現在地＝選択。** 地図は全体を1枚で描くので「中心」という概念が
+    // 無く、動かす意味があるのは現在地の印と「グラフ」で降りる先だけ。潜る
+    // （`drill`）を通さないのは、道を積むと通っていない経路がパンくずに出るため。
+    if (state.layer === "goals" && state.graph.nodes[id]) {
+      state.focusId = id;
+      // 選んだ時点で「降りる先を決めた」ことになる。以後「グラフ」は元の場所へ
+      // 戻さず、選んだゴールへ降りる。
+      if (state.mapReturn) state.mapReturn.picked = true;
+    }
     render();
   };
 
@@ -367,23 +402,30 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   };
 
   /**
-   * 地図へ上がる（「もっと俯瞰」）。**今いる場所を包む一番近いゴールが中心**になる。
+   * 地図へ上がる（「もっと俯瞰」）。**地図はゴール全体を1枚で出す**（2026-09-12）。
    *
-   * 位置を捨てないのが肝。地図をいつも根から出すと、深いところで作業していた人が
-   * 上がるたびに迷子の逆——自分がどこに居たのか分からない全体図——を見ることになる。
+   * 焦点から下だけを描いていた頃は、根が増えた瞬間に丸1つの画面になっていた
+   * （実データで10件中5件）。押しても絵が変わらないので、何が起きたのか分からない。
+   *
+   * 位置を捨てないのは変えていない。**今いる場所を包む一番近いゴールが現在地**
+   * （大きい印＋選択）になる。全体が出ていても、自分がどこに居たのかは要る。
    */
   const goMap = (): void => {
-    const here = state.focusId;
-    const target =
-      (here === undefined ? undefined : enclosingGoal(state.graph, here, state.rev)) ??
-      goalRoots(state.goals)[0] ??
-      state.goals.ids[0];
-    if (target === undefined) {
+    if (state.goals.ids.length === 0) {
       toast("ゴールがまだありません");
       return;
     }
+    const here = state.focusId;
+    // 現在地は、今いる場所を包む一番近いゴール。**無いこともある**——上にゴールが
+    // 1つも無い場所（降格した根の下）から上がったとき。以前はそこで
+    // `goalRoots[0]` へ落としていたが、選び方が id の若い順というだけで、
+    // **無関係なゴールに「今ここ」の印が付く**（のっち報告 2026-09-12。
+    // `哲学を表明する` から上がると `記事で表明する` が現在地になっていた）。
+    // 出せないときは出さない方が嘘が無い。
+    const target = here === undefined ? undefined : enclosingGoal(state.graph, here, state.rev);
     // 縮尺が変わる＝別の絵になるので、拡大率と位置は初期に戻す。
     resetViewport();
+    state.mapReturn = { trail: [...state.trail], picked: false, ...(here ? { focusId: here } : {}), ...(state.selectedId ? { selectedId: state.selectedId } : {}) };
     state.layer = "goals";
     state.mode = "graph";
     // 経路は積み直す。地図の道と詳細の道は段の数が違うので、混ぜると
@@ -394,11 +436,29 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     render();
   };
 
-  /** 地図から降りる。中心にしていたゴールが、そのままグラフの中心になる。 */
+  /**
+   * 地図から降りる。**選んだゴールがあればそこへ、無ければ上がる前の場所へ。**
+   *
+   * 眺めて降りただけなら、入ったところから出る（2026-09-12）。地図は全体を出す
+   * ので、何も選ばずに降りる経路が普通にある——そこで現在地のゴールへ降ろすと、
+   * 上がる前より浅い場所に立たされる。
+   */
   const goDetail = (): void => {
-    const here = state.focusId;
+    const back = state.mapReturn;
+    state.mapReturn = undefined;
     state.layer = "detail";
+    if (back && !back.picked && back.focusId && state.graph.nodes[back.focusId]) {
+      state.mode = "graph";
+      state.focusId = back.focusId;
+      // 消えているノードは落とす。地図を見ている間に外の編集が入ることがある。
+      state.trail = back.trail.filter((id) => state.graph.nodes[id]);
+      state.selectedId = back.selectedId && state.graph.nodes[back.selectedId] ? back.selectedId : back.focusId;
+      render();
+      return;
+    }
+    const here = state.focusId;
     if (here === undefined) {
+      // 現在地もゴールの選択も無い。降りる先が決まらないので TOP へ出す。
       state.mode = "list";
       render();
       return;
@@ -1401,13 +1461,17 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     }
 
     appendTrail();
-    if (state.focusId) {
+    const onMap = state.layer === "goals";
+    if (state.focusId || onMap) {
       appendSep();
       const current = h("span", { class: "current" }, []);
       // 縮尺を文字で言う。押せるものが「グラフ」しか無い状態からでも推測は
       // できるが、半年ぶりに開いた人には推測させない。
-      if (state.layer === "goals") current.append(h("span", { class: "crumb-layer" }, ["地図"]));
-      current.append(document.createTextNode(state.graph.nodes[state.focusId]?.name ?? state.focusId));
+      if (onMap) current.append(h("span", { class: "crumb-layer" }, ["地図"]));
+      // 現在地が無いことがある（上にゴールが1つも無い場所から上がったとき）。
+      // **無関係なゴールの名前を置くより「全体」と言う方が嘘が無い。**
+      const name = state.focusId ? (state.graph.nodes[state.focusId]?.name ?? state.focusId) : undefined;
+      current.append(document.createTextNode(name ?? "全体"));
       bar.append(current);
     }
     const focusId = state.focusId;
@@ -1430,8 +1494,10 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     const body = el("center-body");
     // グラフは表示窓の中で拡大縮小・移動する。外側の余白とスクロールが
     // 残っているとスクロールが二重になるので、モードで切り替える。
-    body.classList.toggle("graph", state.mode === "graph" && !!state.focusId);
-    if (state.mode === "graph" && state.focusId) {
+    // 地図は現在地が無くても描く（上にゴールが無い場所から上がったとき）。
+    const graphMode = state.mode === "graph" && (!!state.focusId || state.layer === "goals");
+    body.classList.toggle("graph", graphMode);
+    if (graphMode) {
       // 地図では**描くグラフと状態を引くグラフが違う**。商グラフの上で状態を
       // 導くと、畳んだぶんだけ前提が消えて「今やれる」に見える。
       const map = state.layer === "goals";
@@ -1445,7 +1511,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         state.cycles.cyclic,
         { onSelect: select, onDrill: drill, onAscend: ascend, onInsert: openInsert },
         state.selectedId,
-        map ? { stateGraph: state.graph, between: state.goals.between } : undefined,
+        map ? { stateGraph: state.graph, between: state.goals.between, roots: mapSeeds(state.goals) } : undefined,
       );
       return;
     }
@@ -1497,11 +1563,16 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     // 何も選んでいない間はインスペクタごと畳む。起動直後は「どれをやるか選ぶ」
     // 段階で、まだ詳細を見る相手がいない。空のパネルで画面の3割を占めるより、
     // 一覧に幅を渡す方がこの画面の仕事に合っている。
-    // 地図に載っていないものが中心になっていたら、黙って詳細へ落とす。
+    // 地図に載っていないものが現在地になっていたら、黙って詳細へ落とす。
     // ゴール宣言を外した・親が付いた・外でファイルが変わった、のどれでも起きる。
-    if (state.layer === "goals" && (state.focusId === undefined || !state.goals.graph.nodes[state.focusId])) {
+    // **現在地が無いのは地図では普通**（上にゴールが1つも無い場所から上がった
+    // とき）なので、そこでは落とさない——落とすと地図そのものが消える。
+    if (state.layer === "goals" && state.focusId !== undefined && !state.goals.graph.nodes[state.focusId]) {
       state.layer = "detail";
     }
+    // 一覧は地図の縮尺を持たない。`goList` で同じことをしているが、削除で焦点が
+    // 消えて一覧へ落ちる経路など、そこを通らない道がある。
+    if (state.mode === "list") state.layer = "detail";
     document.body.classList.toggle("no-inspector", !state.selectedId || !state.graph.nodes[state.selectedId]);
     renderIssueBadge();
     renderUndoBtn();

@@ -34,6 +34,9 @@ const GAP_Y = 48;
 const WRAP_GAP_Y = 16; // 折り返した同じ階層の段どうしの間隔（階層間より狭くする）
 const PAD = 20;
 const CHAR_W = 12; // 日本語混じりの概算。実測より広めに取って被りを防ぐ
+/** 地図の表示窓の鍵。**現在地ではなく「地図という1枚」に対して1つ。**
+ *  ノード id と衝突しない値にしてある（id は ULID、テストでは名前）。 */
+const MAP_VIEW_KEY = "\u0000goal-map";
 
 interface Box {
   id: string;
@@ -61,6 +64,9 @@ export interface GoalOverview {
   stateGraph: Graph;
   /** `betweenKey(from, to)` → 間に挟まっている非ゴールの数。 */
   between: Map<string, number>;
+  /** 地図の描き出し点（`core/goals.ts` の `mapSeeds`）。**これが渡るので、
+   *  地図は焦点の位置に関わらず同じ1枚になる。** */
+  roots: string[];
 }
 
 export interface GraphViewCallbacks {
@@ -78,11 +84,16 @@ export interface GraphViewCallbacks {
  * `requires` は実線、`contains` は破線で区別する。循環しているエッジは
  * 色を変えて、「前提待ち」と「輪で詰まっている」が一目で分かるようにする
  * ——ここを潰していたのが Warframe 版の問題だった。
+ *
+ * **地図（`overview`）では `focusId` は現在地の印でしかなく、描く範囲を決めない。**
+ * 描き出し点は `overview.roots`。上にゴールが1つも無い場所から上がったときは
+ * **現在地そのものが無い**（`focusId` が `undefined`）。
  */
 export function renderGraph(
   container: HTMLElement,
   graph: Graph,
-  focusId: string,
+  /** 現在地。詳細では描く木の根。地図では印だけで、**無いこともある**。 */
+  focusId: string | undefined,
   rev: ReverseIndex,
   cyclic: ReadonlySet<string>,
   cb: GraphViewCallbacks,
@@ -92,20 +103,28 @@ export function renderGraph(
   /** 渡すとゴールだけの地図を描く。線の意味が1種類に畳まれる。 */
   overview?: GoalOverview,
 ): void {
-  const focus = graph.nodes[focusId];
+  const focus = focusId === undefined ? undefined : graph.nodes[focusId];
   // 状態と進捗の出どころ。地図では実グラフ、詳細では今のグラフそのもの。
   const truth = overview?.stateGraph ?? graph;
   container.replaceChildren();
-  if (!focus) {
+  // 地図は現在地が無くても成り立つ——描き出し点は `overview.roots` なので、
+  // 絵そのものは焦点に依存しない。詳細は焦点が木の根なので、無ければ描けない。
+  if (!overview && !focus) {
     container.append(Object.assign(document.createElement("div"), { className: "empty", textContent: "ノードが見つかりません" }));
     return;
   }
 
-  const reqIds = focus.requires.filter((id) => graph.nodes[id]);
-  const conIds = focus.contains.filter((id) => graph.nodes[id]);
+  // 地図は**全体を1枚**で描く（2026-09-12）。焦点から下だけを描いていた頃は、
+  // 根が増えた瞬間に画面が丸1つになった——実データで終わらない根2本を降格した
+  // 直後、10件のゴールのうち5件で自分しか出なくなっていた。**「地図」を押しても
+  // 絵が変わらないので、何が起きたのか分からない。** 詳細は今までどおり焦点1つから。
+  const seeds = overview ? overview.roots.filter((id) => graph.nodes[id]) : [focus!.id];
+  const seedSet = new Set(seeds);
+  // 内包は焦点の直下1段だけ。地図の商グラフは線を `requires` に積んである
+  // （`core/goals.ts`）ので、こちらは空になる。
+  const conIds = overview ? [] : focus!.contains.filter((id) => graph.nodes[id]);
 
   const boxes: Box[] = [];
-  const focusW = boxWidth(focus.name);
 
   const rowWidth = (ids: string[]): number =>
     ids.reduce((acc, id) => acc + boxWidth(graph.nodes[id]!.name) + GAP_X, -GAP_X);
@@ -150,12 +169,12 @@ export function renderGraph(
   const tiers: { ids: string[]; kind: "requires" | "contains" }[] = [];
   // 同じノードは1回だけ置く。合流点も輪もこれで止まる
   // （線は毎回引くので、複数の親から要求されていることは見た目に残る）。
-  const placed = new Set<string>([focusId]);
+  const placed = new Set<string>(seeds);
   /** 見つけた順。段の中の並びをここで決める——親の順に子が並ぶので、
    *  線が交差しにくい。 */
   const found = new Map<string, number>();
 
-  let frontier = [focusId];
+  let frontier = [...seeds];
   while (frontier.length > 0) {
     const next: string[] = [];
     for (const pid of frontier) {
@@ -182,7 +201,7 @@ export function renderGraph(
    * 反復で押し下げる。輪があると際限なく深くなるので、ノード数で打ち切る
    * ——そこまで回れば、輪の外にあるものは全部確定している。
    */
-  const depthOf = new Map<string, number>([[focusId, 0]]);
+  const depthOf = new Map<string, number>(seeds.map((id) => [id, 0]));
   for (let pass = 0; pass < placed.size; pass += 1) {
     let moved = false;
     for (const e of edges) {
@@ -198,7 +217,9 @@ export function renderGraph(
 
   const byDepth = new Map<number, string[]>();
   for (const id of placed) {
-    if (id === focusId) continue;
+    // 先頭の段に置くものは飛ばす。輪があると押し下げでもっと深い値が付くが、
+    // 描き出し点は段0に留める。
+    if (seedSet.has(id)) continue;
     const d = depthOf.get(id) ?? 1;
     const row = byDepth.get(d);
     if (row) row.push(id);
@@ -209,20 +230,21 @@ export function renderGraph(
     tiers.push({ ids, kind: "requires" });
   }
 
-  for (const cid of conIds) edges.push({ from: focusId, to: cid, kind: "contains" });
+  // 内包の線は焦点から。地図では `conIds` が空なので、ここは詳細だけを通る。
+  for (const cid of conIds) edges.push({ from: focus!.id, to: cid, kind: "contains" });
   const conFresh = conIds.filter((id) => !placed.has(id));
   for (const id of conFresh) placed.add(id);
   if (conFresh.length > 0) tiers.push({ ids: conFresh, kind: "contains" });
 
+  const seedLines = wrapRows(seeds);
   const tierLines = tiers.map((t) => ({ kind: t.kind, lines: wrapRows(t.ids) }));
-  const widest = Math.max(focusW, ...tierLines.flatMap((t) => t.lines.map(rowWidth)), 240);
+  const widest = Math.max(...seedLines.map(rowWidth), ...tierLines.flatMap((t) => t.lines.map(rowWidth)), 240);
   const contentW = Math.min(widest, avail);
   const totalW = contentW + PAD * 2;
 
-  const centerX = PAD + contentW / 2;
-  boxes.push({ id: focusId, x: centerX - focusW / 2, y: PAD, w: focusW, state: resolveState(truth, focusId, cyclic), kind: "focus" });
-
-  let y = PAD + NODE_H + GAP_Y;
+  /** 現在地だけ印を大きくする。**地図では段0に居るとは限らない**——上がって
+   *  きた場所が中腹のゴールなら、その段で大きくなる。 */
+  const kindOf = (id: string, fallback: Box["kind"]): Box["kind"] => (id === focusId ? "focus" : fallback);
   /** 折り返した各段を中央揃えで置き、使った高さを返す。 */
   const layLines = (lines: string[][], kind: "requires" | "contains", startY: number): number => {
     let rowY = startY;
@@ -230,14 +252,25 @@ export function renderGraph(
       let x = PAD + (contentW - rowWidth(line)) / 2;
       for (const id of line) {
         const w = boxWidth(graph.nodes[id]!.name);
-        boxes.push({ id, x, y: rowY, w, state: resolveState(truth, id, cyclic), kind });
+        boxes.push({ id, x, y: rowY, w, state: resolveState(truth, id, cyclic), kind: kindOf(id, kind) });
         x += w + GAP_X;
       }
       rowY += NODE_H + WRAP_GAP_Y;
     }
     return rowY - WRAP_GAP_Y - startY;
   };
+
+  // 段の並べ方は詳細と地図で同じ。違うのは先頭の段が「焦点1つ」か
+  // 「地図の描き出し点ぜんぶ」かだけ。
+  let y = PAD;
+  y += layLines(seedLines, "requires", y) + GAP_Y;
+  /** 段ラベルを置く高さ。**種類ではなく位置で持つ**——地図では先頭の段も
+   *  `requires` なので、種類で探すと先頭の行にラベルが乗る。 */
+  let belowY: number | undefined;
+  let containsY: number | undefined;
   for (const tier of tierLines) {
+    if (tier.kind === "contains") containsY = y;
+    else if (belowY === undefined) belowY = y;
     y += layLines(tier.lines, tier.kind, y) + GAP_Y;
   }
   const totalH = Math.max(y - GAP_Y + PAD, PAD * 2 + NODE_H);
@@ -330,17 +363,17 @@ export function renderGraph(
   // ラベル（requires / contains の区別を文字でも出す。線種だけだと分かりにくい）
   // 地図では線が1種類に畳まれている（前提と分割の区別は縮約で消える）ので、
   // 語彙もそれに合わせて1つにする。2つ出すと、消えた区別がまだあるように読める。
-  const rows: [string, Box | undefined][] = overview
-    ? [["この先にあるゴール", boxes.find((b) => b.kind === "requires")]]
+  const rows: [string, number | undefined][] = overview
+    ? [["この先にあるゴール", belowY]]
     : [
-        ["これが必要（前提）", boxes.find((b) => b.kind === "requires")],
-        ["これで構成（内包）", boxes.find((b) => b.kind === "contains")],
+        ["これが必要（前提）", belowY],
+        ["これで構成（内包）", containsY],
       ];
-  for (const [label, sample] of rows) {
-    if (!sample) continue;
+  for (const [label, rowY] of rows) {
+    if (rowY === undefined) continue;
     const t = document.createElementNS(svgNs, "text");
     t.setAttribute("x", String(PAD));
-    t.setAttribute("y", String(sample.y - 8));
+    t.setAttribute("y", String(rowY - 8));
     t.setAttribute("class", "edge-label");
     t.textContent = label;
     view.append(t);
@@ -489,7 +522,12 @@ export function renderGraph(
       // ノードで出られるようにするため。道が空のときに選び直しへ落ちるのは
       // 呼び先（`ascend`）の判断で、ここでは分けない——「焦点かどうか」しか
       // 見ていない場所に、道の深さという別の条件を持ち込まない。
-      if (b.kind === "focus") cb.onAscend(b.id);
+      //
+      // **地図では選ぶだけ。** 全体が1枚なので押しても絵は変わらず、動くのは
+      // 現在地（大きい印）と「グラフ」で降りる先だけ。潜って中心を移す操作は、
+      // 地図が焦点から下だけを描いていた頃の名残（2026-09-12 に外した）。
+      if (overview) cb.onSelect(b.id);
+      else if (b.kind === "focus") cb.onAscend(b.id);
       else if (!hasChildren(graph, b.id)) cb.onSelect(b.id);
       else cb.onDrill(b.id);
     });
@@ -512,23 +550,38 @@ export function renderGraph(
     view.append(g);
   }
 
+  // 丸1つしか無い絵。詳細では「下がまだ無いノード」、地図では「ゴールが1件だけ」。
+  const alone = boxes.length <= 1;
   const wrap = document.createElement("div");
   // 子が無いときは表示窓を伸ばさない。動かすものが無い上に、案内文が
   // ペインの下端まで押し出されてノードから離れてしまう。
-  wrap.className = `graph-wrap${reqIds.length === 0 && conIds.length === 0 ? " short" : ""}`;
+  wrap.className = `graph-wrap${alone ? " short" : ""}`;
   wrap.append(svg);
   container.append(wrap);
   // 表示窓の寸法が要るので、DOM へ入れてから配線する。
-  mountViewport({ wrap, view, host: container, focusId, contentW: totalW, contentH: totalH, onInteract: hideFlyout });
+  // **地図の鍵は固定する。** 拡大率と位置は鍵ごとに持つので、現在地を鍵にすると
+  // 地図でゴールを選び直した瞬間に表示が初期位置へ戻る。地図はどれを選んでいても
+  // 同じ1枚なので、動かした場所はそのままでいい。
+  mountViewport({
+    wrap,
+    view,
+    host: container,
+    viewKey: overview ? MAP_VIEW_KEY : focusId!,
+    contentW: totalW,
+    contentH: totalH,
+    onInteract: hideFlyout,
+  });
   // 凡例は表示窓ではなくペインに置く。窓は子が無いと 140px に縮むので、
   // 窓基準だと「！」がノードの隣あたりまで上がってきて、開くたびに高さが違う。
-  mountLegend(container);
+  mountLegend(container, !!overview);
 
-  if (reqIds.length === 0 && conIds.length === 0) {
+  if (alone) {
     const hint = document.createElement("div");
     hint.className = "empty";
     hint.textContent = overview
-      ? "このゴールの先に、他のゴールはありません。「グラフ」に切り替えると中を分解できます。"
+      ? boxes.length === 0
+        ? "地図に出すゴールがまだありません。"
+        : "地図に出ているゴールは1件だけです。「グラフ」に切り替えると中を分解できます。"
       : "このノードにはまだ下がありません。右のパネルから「前提を一括追加」で分解できます。";
     container.append(hint);
   }
