@@ -19,7 +19,7 @@ import {
   type TogglePlan,
   type ToggleUndo,
 } from "../core/engine.ts";
-import { parseBulkRequires, parseDsl, type DslParseResult } from "../core/dsl.ts";
+import { parseBulkLinks, parseDsl, type DslParseResult } from "../core/dsl.ts";
 import { newGraph, newNode, type Graph, type Node } from "../core/model.ts";
 import { GOALS_DIR, renderMocs } from "../core/moc.ts";
 import { applyPlan, normalizeForDuplicateCheck, planReconcile, type ReconcilePlan } from "../core/reconcile.ts";
@@ -324,7 +324,12 @@ export class MarkdownGraphStore {
 
   /** 前提の一括追加（`requires` のみ・改行区切り・フラット1段）。 */
   async addBulkRequires(graph: Graph, targetId: string, lines: string): Promise<BulkResult> {
-    return this.applyDslResult(graph, parseBulkRequires(targetId, lines));
+    return this.addBulk(graph, targetId, lines, "requires");
+  }
+
+  /** 一括追加（改行区切り・フラット1段）。前提か中身かを選ぶ。 */
+  async addBulk(graph: Graph, targetId: string, lines: string, kind: "requires" | "contains"): Promise<BulkResult> {
+    return this.applyDslResult(graph, parseBulkLinks(targetId, lines, kind));
   }
 
   /** DSL 一括生成。 */
@@ -384,12 +389,16 @@ export class MarkdownGraphStore {
     for (const inc of incoming) {
       const target = graph.nodes[idOf.get(inc.id)!]!;
       const before = target.requires.length + target.contains.length;
-      const map = (ref: string): string => idOf.get(ref) ?? ref;
-      for (const to of new Set(inc.requires.map(map))) {
+      // 自分自身へは繋がない。一括追加に自分の名前を書くと、名前→id の解決で
+      // 自分に戻ってきて自己ループになる（起点は id で渡るので、名前の照合を
+      // すり抜ける）。
+      const map = (refs: readonly string[]): string[] =>
+        refs.map((ref) => idOf.get(ref) ?? ref).filter((id) => id !== target.id);
+      for (const to of new Set(map(inc.requires))) {
         if (!target.requires.includes(to)) addedRequires.push({ from: target.id, to });
       }
-      target.requires = [...new Set([...target.requires, ...inc.requires.map(map)])];
-      target.contains = [...new Set([...target.contains, ...inc.contains.map(map)])];
+      target.requires = [...new Set([...target.requires, ...map(inc.requires)])];
+      target.contains = [...new Set([...target.contains, ...map(inc.contains)])];
       const changed = target.requires.length + target.contains.length !== before;
       if (changed && !createdSet.has(target.id) && !updated.includes(target.id)) updated.push(target.id);
     }

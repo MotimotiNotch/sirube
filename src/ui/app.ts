@@ -1209,22 +1209,53 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     ta.focus();
   };
 
-  const openBulkAdd = (targetId: string): void => {
+  /**
+   * 一括追加。**前提（requires）と中身（contains）をタブで切り替える。**
+   *
+   * 中身の側は 2026-09-14 に足した（のっち、足りない機能の4番目）。終わらない
+   * 括り（動詞のまとまり）へ作業を足すのに、DSL を書くしか道が無かった。
+   * ボタンを2つに増やさずタブにしたのは、入力の形（1行1ノード）が同じで、
+   * 違うのは「何を問うか」だけだから。見出しの問いを入れ替え、判別の一問を
+   * その下に置く。
+   *
+   * タブを押し直しても**書きかけは持ち越す**（「まとめて書く」とは逆）。
+   * 書式が同じなので、書いてから「これは中身だった」と気づいて切り替える
+   * のが自然な流れになる。
+   */
+  const openBulkAdd = (targetId: string, kind: "requires" | "contains" = "requires", draft = ""): void => {
     clear(modal);
-    modal.append(h("h3", {}, [`「${nameOf(targetId)}」には何が必要？`]));
+    const tabs = h("div", { class: "modal-tabs" });
+    const tab = (k: "requires" | "contains", label: string): HTMLButtonElement => {
+      const b = h("button", { class: `modal-tab${k === kind ? " on" : ""}`, type: "button" }, [label]);
+      b.addEventListener("click", () => openBulkAdd(targetId, k, ta.value));
+      return b;
+    };
+    tabs.append(tab("requires", "前提"), tab("contains", "中身"));
+    modal.append(tabs);
+
+    modal.append(
+      h("h3", {}, [kind === "requires" ? `「${nameOf(targetId)}」には何が必要？` : `「${nameOf(targetId)}」は何でできている？`]),
+    );
     modal.append(
       h("p", { class: "hint" }, [
+        kind === "requires"
+          ? "揃ったあとも「" + nameOf(targetId) + "」自体にやることが残るなら前提。"
+          : "全部揃えば「" + nameOf(targetId) + "」自体にやることは残らないなら中身（担当分・部品・機能のまとまり）。",
         "1行に1つ書く。既にある名前を書けば、そのノードに繋がる（新しくは作られない）。Ctrl+Enter で追加。",
       ]),
     );
-    const ta = h("textarea", { placeholder: "引っ越し先の家\nお金を貯める\n不動産に行く" }) as HTMLTextAreaElement;
+    const ta = h("textarea", {
+      placeholder: kind === "requires" ? "引っ越し先の家\nお金を貯める\n不動産に行く" : "近道を見せる\n中身を一括で足す",
+    }) as HTMLTextAreaElement;
+    ta.value = draft;
     modal.append(ta);
 
     const preview = h("div", { class: "hint", style: "margin-top:8px;font-size:12px" });
     const updatePreview = (): void => {
       const lines = ta.value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-      preview.textContent = lines.length === 0 ? "" : `${lines.length} 件の前提を追加します`;
+      preview.textContent = lines.length === 0 ? "" : `${lines.length} 件の${kind === "requires" ? "前提" : "中身"}を追加します`;
     };
+    updatePreview();
     ta.addEventListener("input", updatePreview);
     modal.append(preview);
 
@@ -1241,7 +1272,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       }
     });
     ok.addEventListener("click", async () => {
-      const res = await store.addBulkRequires(state.graph, targetId, ta.value);
+      const containsBefore = [...(state.graph.nodes[targetId]?.contains ?? [])];
+      const res = await store.addBulk(state.graph, targetId, ta.value, kind);
       if (res.errors.length > 0) {
         toast(res.errors[0]!.message);
         return;
@@ -1250,12 +1282,56 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       closeModal();
       focusFresh(targetId);
       toast(`${res.created.length} 件を追加しました`);
-      offerShortcuts(res.addedRequires);
+      if (kind === "requires") offerShortcuts(res.addedRequires);
+      else offerReopen(targetId, containsBefore);
     });
     actions.append(cancel, ok);
     modal.append(actions);
     openModal();
     ta.focus();
+  };
+
+  /**
+   * 達成済みの親へ未達の中身を足したとき、親を未達に戻すか聞く。
+   *
+   * `contains` の親は子が揃うと自動で達成になるが、逆（子が戻ったら親も戻す）は
+   * しない——到達した達成は記録として残す（2026-08-26 のっち判断）。その判断は
+   * 変えない。ただ**新しく足した中身**は「戻った子」ではなく、今ある分がまだ
+   * 終わっていないという話なので、黙って達成のまま残すと親が嘘をつく。自動では
+   * 戻さず、ここで本人に選ばせる。
+   *
+   * 戻すときは普通のトグルを通す（上に積んだものが連動するなら下見が出る）。
+   * 聞くのは今回繋いだ子だけ。前から中にあった未達で毎回聞くと、上の判断で
+   * 残した記録をそのたびに問い直すことになる。
+   */
+  const offerReopen = (parentId: string, containsBefore: readonly string[]): void => {
+    const parent = state.graph.nodes[parentId];
+    if (!parent?.satisfied) return;
+    const before = new Set(containsBefore);
+    const fresh = parent.contains.filter(
+      (id) => !before.has(id) && resolveState(state.graph, id, state.cycles.cyclic) !== "SATISFIED",
+    );
+    if (fresh.length === 0) return;
+
+    clear(modal);
+    modal.append(h("h3", {}, [`「${parent.name}」は達成済みです`]));
+    modal.append(
+      h("p", { class: "hint" }, [
+        `未達の中身を ${fresh.length} 件足したので、今ある分はまだ終わっていません。未達に戻しますか？ 戻さないと、達成のまま中に未達が残ります（自動解決はここを戻しません）。`,
+      ]),
+    );
+    const actions = h("div", { class: "modal-actions" });
+    const keep = h("button", { class: "btn", type: "button" }, ["そのまま"]);
+    keep.addEventListener("click", closeModal);
+    const ok = h("button", { class: "btn primary", type: "button" }, ["未達に戻す"]);
+    ok.addEventListener("click", () => {
+      closeModal();
+      if (state.graph.nodes[parentId]?.satisfied) void toggle(parentId);
+    });
+    actions.append(keep, ok);
+    modal.append(actions);
+    openModal();
+    keep.focus();
   };
 
   /**

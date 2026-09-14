@@ -186,35 +186,39 @@ export function parseDsl(input: string): DslParseResult {
 }
 
 /**
- * 前提の一括追加。選択中のノードを起点に、改行区切りのリストから
- * 複数の前提ノードを一度に作って `requires` で繋ぐ。
+ * 一括追加。選択中のノードを起点に、改行区切りのリストから複数のノードを
+ * 一度に作って `requires`（前提）か `contains`（中身）で繋ぐ。
  *
  * 分解の流れ（「これには A と B と C が要る」と思った瞬間に3行打つ）に
- * 直結する MVP の中核機能だが、実装は**既存 DSL への組み立て直し**で済む。
- * 新しいパーサは要らない。
+ * 直結する MVP の中核機能。
  *
- *   選択中: 引っ越し
- *   引っ越し先の家        →  引っ越し -> 引っ越し先の家,
- *   お金を貯める              引っ越し -> お金を貯める,
- *   不動産に行く              引っ越し -> 不動産に行く
- *
- * 仕様（2026-08-31 確定）:
+ * 仕様（2026-08-31 確定、`contains` は 2026-09-14 に追加）:
  *  - 区切りは改行。1行1ノード。空行と前後の空白は無視
  *  - 既存ノード名と一致したら新規作成せず、その既存ノードに繋ぐ
  *    （DSL の `getOrCreateNode` と同じ挙動）
- *  - 階層は無し（フラット1段）。`contains` 側の一括追加は当面やらない
+ *  - 階層は無し（フラット1段）
+ *
+ * `contains` 側を足したのは、終わらない括り（「分解する機能」のような動詞の
+ * まとまり）へ作業を足す道が「まとめて書く」に DSL を書くしか無かったため
+ * （のっち 2026-09-14、足りない機能の4番目として選択）。
+ *
+ * **DSL の文字列に組み立て直さない。** 以前は `引っ越し -> 家, ...` を作って
+ * `parseDsl` に流していたが、それだと名前に `,` `->` `[` `]` が入った行が
+ * 別のノードに割れる（`A, B を比べる` が2つになる）。1行1ノードの入力に
+ * 記号の意味を持ち込む理由は無いので、ノードを直接組む。
  */
-export function buildBulkRequiresDsl(targetId: string, lines: string): string {
+export function parseBulkLinks(targetId: string, lines: string, kind: "requires" | "contains"): DslParseResult {
   const names = lines
     .split(/\r?\n/)
     .map((s) => s.replace(/\s+/g, " ").trim())
     .filter((s) => s.length > 0 && s !== targetId);
   const unique = [...new Set(names)];
-  return unique.map((n) => `${targetId} -> ${n}`).join(", ");
+  if (unique.length === 0) return { nodes: [], errors: [] };
+  const target = newNode(targetId);
+  target[kind] = unique;
+  return { nodes: [target, ...unique.map((n) => newNode(n))], errors: [] };
 }
 
 export function parseBulkRequires(targetId: string, lines: string): DslParseResult {
-  const dsl = buildBulkRequiresDsl(targetId, lines);
-  if (dsl === "") return { nodes: [], errors: [] };
-  return parseDsl(dsl);
+  return parseBulkLinks(targetId, lines, "requires");
 }

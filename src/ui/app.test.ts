@@ -1299,6 +1299,27 @@ describe("前提の一括追加", () => {
     expect(text("inspector")).not.toContain("これが必要");
   });
 
+  test("中身タブに切り替えると問いが変わり、書きかけは持ち越される", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    findButton("inspector", "前提を一括追加")!.click();
+    await tick();
+    const ta = $("modal").querySelector("textarea") as HTMLTextAreaElement;
+    ta.value = "書類をそろえる";
+    ta.dispatchEvent(new Event("input"));
+
+    findButton("modal", "中身")!.click();
+    await tick();
+    expect(text("modal")).toContain("「確定申告」は何でできている？");
+    expect(($("modal").querySelector("textarea") as HTMLTextAreaElement).value).toBe("書類をそろえる");
+    expect(text("modal")).toContain("1 件の中身を追加します");
+
+    findButton("modal", "追加")!.click();
+    await tick();
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(true); // 親は未達なので、戻すか聞かない
+    expect(text("center-body")).toContain("書類をそろえる");
+  });
+
   test("Ctrl+Enter で確定できる", async () => {
     // 改行で項目を区切る入力なので、確定でマウスへ往復させると分解が止まる。
     findButton("root-list", "確定申告")!.click();
@@ -1313,6 +1334,58 @@ describe("前提の一括追加", () => {
 
     expect($("modal-backdrop").classList.contains("hidden")).toBe(true);
     expect(text("center-body")).toContain("e-Taxの利用者識別番号を取る");
+  });
+});
+
+describe("達成済みの括りへ中身を足す", () => {
+  const id = (tail: string): string => `01M0RE0PEN${tail}${"0".repeat(14)}`;
+  const md = (name: string, satisfied: boolean, contains: string[]): string =>
+    [
+      "---",
+      `name: ${name}`,
+      `satisfied: ${satisfied}`,
+      "requires: []",
+      contains.length === 0 ? "contains: []" : "contains:",
+      ...contains.map((c) => `  - ${c}`),
+      "---",
+      "",
+    ].join("\n");
+
+  beforeEach(async () => {
+    document.body.innerHTML = HTML;
+    localStorage.clear();
+    await startApp(
+      new MemoryFs({
+        [id("A0")]: md("分解する機能", true, [id("B0")]),
+        [id("B0")]: md("前提の一括追加", true, []),
+      }),
+    );
+    findButton("root-list", "分解する機能")!.click();
+    await tick();
+    findButton("inspector", "前提を一括追加")!.click();
+    await tick();
+    findButton("modal", "中身")!.click();
+    await tick();
+    const ta = $("modal").querySelector("textarea") as HTMLTextAreaElement;
+    ta.value = "中身を一括で足す";
+    ta.dispatchEvent(new Event("input"));
+    findButton("modal", "追加")!.click();
+    await tick();
+  });
+
+  test("未達に戻すか聞き、戻すと括りが未達になる", async () => {
+    expect(text("modal")).toContain("「分解する機能」は達成済みです");
+    // 入力の無い確認なので、Enter の勢いで書かないよう「そのまま」にフォーカス
+    expect(document.activeElement?.textContent).toBe("そのまま");
+    findButton("modal", "未達に戻す")!.click();
+    await tick();
+    expect(findButton("inspector", "達成にする")).toBeTruthy();
+  });
+
+  test("「そのまま」なら達成のまま残す", async () => {
+    findButton("modal", "そのまま")!.click();
+    await tick();
+    expect(findButton("inspector", "達成を取り消す")).toBeTruthy();
   });
 });
 

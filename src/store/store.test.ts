@@ -7,6 +7,7 @@ import { MarkdownGraphStore } from "./store.ts";
 import { isUlid } from "../core/ulid.ts";
 
 const md = (fm: string, body = "") => `---\n${fm}\n---\n${body ? `\n${body}\n` : ""}`;
+const ID_A = `01M2F0SE1F${"0".repeat(16)}`; // Crockford に L は無い
 
 describe("frontmatter", () => {
   test("読み書きの往復で内容が保たれる", () => {
@@ -145,6 +146,31 @@ describe("ストア", () => {
     expect(graph.nodes["引っ越し"]!.satisfied).toBe(true);
     expect(graph.nodes["引っ越し"]!.note).toBe("3月中にやる");
     expect(graph.nodes["引っ越し"]!.requires.sort()).toEqual(res.created.sort());
+  });
+
+  test("中身（contains）の一括追加は contains に繋ぎ、既存の名前は既存に繋ぐ", async () => {
+    const fs = new MemoryFs({
+      括り: md("satisfied: false\nrequires: []\ncontains: []"),
+      既存の作業: md("satisfied: true\nrequires: []\ncontains: []"),
+    });
+    const store = new MarkdownGraphStore(fs);
+    const { graph } = await store.load();
+    const res = await store.addBulk(graph, "括り", "既存の作業\n新しい作業", "contains");
+    expect(res.errors).toEqual([]);
+    expect(res.created).toHaveLength(1);
+    expect(graph.nodes["括り"]!.requires).toEqual([]);
+    expect(graph.nodes["括り"]!.contains).toEqual(["既存の作業", res.created[0]!]);
+    expect(res.addedRequires).toEqual([]);
+  });
+
+  test("一括追加に自分の名前を書いても自己ループにしない", async () => {
+    // 起点は id で渡るので、名前→id の解決で自分に戻ってくる
+    const fs = new MemoryFs({ [ID_A]: md("name: 引っ越し\nsatisfied: false\nrequires: []\ncontains: []") });
+    const store = new MarkdownGraphStore(fs);
+    const { graph } = await store.load();
+    await store.addBulk(graph, ID_A, "引っ越し\n家", "requires");
+    expect(graph.nodes[ID_A]!.requires).not.toContain(ID_A);
+    expect(graph.nodes[ID_A]!.requires).toHaveLength(1); // 陽性対照: 「家」は繋がっている
   });
 
   test("一括追加は今回足した requires だけを返す", async () => {

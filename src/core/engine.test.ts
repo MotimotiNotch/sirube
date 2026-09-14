@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseDsl, parseBulkRequires, buildBulkRequiresDsl } from "./dsl.ts";
+import { parseDsl, parseBulkLinks, parseBulkRequires } from "./dsl.ts";
 import {
   analyzeCycles,
   applyTogglePlan,
@@ -397,20 +397,36 @@ describe("DSL", () => {
 });
 
 describe("前提の一括追加", () => {
-  test("改行リストが DSL 文字列に組み上がる", () => {
-    const dsl = buildBulkRequiresDsl("引っ越し", "引っ越し先の家\n\n  お金を貯める  \n不動産に行く");
-    expect(dsl).toBe("引っ越し -> 引っ越し先の家, 引っ越し -> お金を貯める, 引っ越し -> 不動産に行く");
+  test("改行リストが1行1ノードの前提になる。空行と前後の空白は無視", () => {
+    const parsed = parseBulkRequires("引っ越し", "引っ越し先の家\n\n  お金を貯める  \n不動産に行く");
+    expect(parsed.errors).toEqual([]);
+    const target = parsed.nodes.find((n) => n.id === "引っ越し")!;
+    expect(target.requires).toEqual(["引っ越し先の家", "お金を貯める", "不動産に行く"]);
+    expect(target.contains).toEqual([]);
   });
 
   test("重複行と自己参照は落ちる", () => {
-    expect(buildBulkRequiresDsl("A", "B\nB\nA")).toBe("A -> B");
+    const target = parseBulkRequires("A", "B\nB\nA").nodes.find((n) => n.id === "A")!;
+    expect(target.requires).toEqual(["B"]);
   });
 
-  test("既存 DSL パーサをそのまま通る（新規パーサ不要）", () => {
-    const parsed = parseBulkRequires("引っ越し", "家\nお金");
+  test("中身（contains）でも同じ入力で繋げる", () => {
+    const parsed = parseBulkLinks("分解する機能", "近道を見せる\n中身の一括追加", "contains");
+    const target = parsed.nodes.find((n) => n.id === "分解する機能")!;
+    expect(target.contains).toEqual(["近道を見せる", "中身の一括追加"]);
+    expect(target.requires).toEqual([]);
+  });
+
+  test("名前に , や -> や [ ] が入っていても1行は1ノードのまま", () => {
+    // 以前は DSL 文字列に組み立て直していたので、記号のところで別のノードに割れた
+    const parsed = parseBulkRequires("比べる", "A, B を比べる\n入力 -> 出力の対応表\n[下書き] を読む");
     expect(parsed.errors).toEqual([]);
-    const target = parsed.nodes.find((n) => n.id === "引っ越し")!;
-    expect(target.requires).toEqual(["家", "お金"]);
+    expect(parsed.nodes.find((n) => n.id === "比べる")!.requires).toEqual([
+      "A, B を比べる",
+      "入力 -> 出力の対応表",
+      "[下書き] を読む",
+    ]);
+    expect(parsed.nodes).toHaveLength(4);
   });
 });
 
