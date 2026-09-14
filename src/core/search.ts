@@ -21,7 +21,19 @@ import {
   type Neighbors,
   type ReverseIndex,
 } from "./engine.ts";
+import { effectiveDues, type EffectiveDue } from "./engine.ts";
 import type { Graph, NodeState } from "./model.ts";
+
+/** 行に載せる期限。**達成済みは伝わってこない**ので自分の期限のまま（`effectiveDues`）。 */
+function dueFields(
+  dues: ReadonlyMap<string, EffectiveDue>,
+  id: string,
+  own: string | undefined,
+): { due?: string; dueFrom?: string } {
+  const eff = dues.get(id);
+  if (!eff) return own !== undefined ? { due: own } : {};
+  return eff.from === id ? { due: eff.date } : { due: eff.date, dueFrom: eff.from };
+}
 
 export interface SearchOptions {
   /** 空文字なら全件（フィルタのみ適用）。名前と本文を対象にする。 */
@@ -51,7 +63,10 @@ export interface SearchHit {
   breadcrumb: string[];
   /** 何箇所から要求されているか＝構造から出る優先度。 */
   inDegree: number;
+  /** 効いている期限。上から伝わったものを含む（`effectiveDues`）。 */
   due?: string;
+  /** `due` が上から伝わったものなら、その期限を持っているノード。自分の期限なら無い。 */
+  dueFrom?: string;
   /** 一致が本文側だったかどうか（UI が抜粋を出す判断に使う）。 */
   matchedIn: ("name" | "note" | "number")[];
   /** vault 内で通しの番号（`#12`）。行に出して口頭で指せるようにする。 */
@@ -138,6 +153,8 @@ export function search(g: Graph, rev: ReverseIndex, opts: SearchOptions = {}): S
   // 配下の集合は1回だけ作る。ヒットごとに祖先を辿ると、木の深さぶん同じ道を
   // 何度も上ることになる。
   const scope = under === undefined ? undefined : new Set(collectMembers(g, under));
+  // 上から伝わった期限（`effectiveDues`）。行ごとに上を辿らず、1回で全体を塗る。
+  const dues = effectiveDues(g);
 
   const hits: SearchHit[] = [];
   for (const [id, node] of Object.entries(g.nodes)) {
@@ -162,7 +179,7 @@ export function search(g: Graph, rev: ReverseIndex, opts: SearchOptions = {}): S
       inDegree: inDegree(id, rev),
       matchedIn,
       ...(node.number !== undefined ? { number: node.number } : {}),
-      ...(node.due !== undefined ? { due: node.due } : {}),
+      ...dueFields(dues, id, node.due),
     };
     if (neighborDepth === 1) hit.neighbors = neighbors(g, id, rev);
     hits.push(hit);

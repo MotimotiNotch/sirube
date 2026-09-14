@@ -759,6 +759,63 @@ export function descendantOutline(
 }
 
 // ---------------------------------------------------------------------------
+// 期限の伝播
+// ---------------------------------------------------------------------------
+
+export interface EffectiveDue {
+  /** 実際に効いている期限（`YYYY-MM-DD`）。 */
+  date: string;
+  /** その期限を持っているノード。**自分の期限が効いているなら自分の id。** */
+  from: string;
+}
+
+/** 伝える期限の書式。文字列の大小がそのまま日付の前後になる形だけを扱う。 */
+const DUE_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 期限を前提へ伝える（2026-09-14、MOC で「既存タスク管理に無い性質」として
+ * 後回しにしていた芽）。**「引っ越しが3/31」なら、その前提の「家を見つける」も
+ * 暗黙に3/31まで。** 下にあるものが上より後に終わっても、上は間に合わない。
+ *
+ * - **下へ伝える向きは `requires` と `contains` の両方。** どちらも「上が終わる
+ *   には下が要る」ので、期限の意味では区別が無い（`resolveState` と同じ理由）
+ * - 自分にも期限があるときは**早い方**が効く
+ * - **達成済みは伝えないし、受け取らない。** 済んだものの期限は何も縛らない。
+ *   達成済みの中継点も通さない——その下はもう上の期限のために急ぐものではない
+ * - 書式が `YYYY-MM-DD` でない期限は伝えない（自分の表示にはそのまま残る）
+ * - 輪があっても止まる
+ *
+ * **ファイルには書かない。** 状態と同じく、読むたびに導出する。書くと上の期限を
+ * 動かしたときに下の全ファイルを書き直すことになり、手で書いた期限と区別も
+ * つかなくなる。警告や催促もしない（期限の方針のまま）。
+ *
+ * 早い期限から順に下へ塗り、塗り済みのノードで止まる。先に塗った方が早いので、
+ * 塗り済みの下は既にそれ以下の期限で塗られている——全体で O(ノード + エッジ)。
+ */
+export function effectiveDues(g: Graph): Map<string, EffectiveDue> {
+  const out = new Map<string, EffectiveDue>();
+  const sources = Object.values(g.nodes)
+    .filter((n) => !n.satisfied && n.due !== undefined && DUE_FORMAT.test(n.due))
+    .sort((a, b) => a.due!.localeCompare(b.due!) || a.id.localeCompare(b.id));
+  for (const src of sources) {
+    if (out.has(src.id)) continue; // もっと早い期限が上から届いている
+    const due: EffectiveDue = { date: src.due!, from: src.id };
+    out.set(src.id, due);
+    const stack = [src.id];
+    while (stack.length > 0) {
+      const node = g.nodes[stack.pop()!]!;
+      for (const childId of [...node.requires, ...node.contains]) {
+        const child = g.nodes[childId];
+        if (!child || child.satisfied || out.has(childId)) continue;
+        out.set(childId, due);
+        stack.push(childId);
+      }
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // 隣接（検索の「近接情報を浮かび上がらせる」用）
 // ---------------------------------------------------------------------------
 

@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { buildReverseIndex, resolveState } from "./engine.ts";
-import { betweenKey, enclosingGoal, goalIds, goalLayer, goalRoots, isGoal, mapSeeds } from "./goals.ts";
+import { betweenKey, enclosingGoal, goalIds, goalLayer, goalRoots, isEndlessRoot, isGoal, mapSeeds } from "./goals.ts";
 import { parseDsl } from "./dsl.ts";
 import { newGraph, type Graph } from "./model.ts";
 
@@ -19,6 +19,21 @@ function g(dsl: string): Graph {
 }
 
 const rev = (graph: Graph) => buildReverseIndex(graph);
+
+describe("終わらない根", () => {
+  test("`goal: false` を書いた入次数0だけ。逆引きの有無で答えが変わらない", () => {
+    const graph = g("哲学 -> 途中 -> 末端, 目的 -> 別");
+    graph.nodes["哲学"]!.goal = false;
+    // 中腹に false が書かれていても根ではないので拾わない
+    graph.nodes["途中"]!.goal = false;
+    for (const r of [rev(graph), undefined]) {
+      expect(isEndlessRoot(graph, "哲学", r)).toBe(true);
+      expect(isEndlessRoot(graph, "途中", r)).toBe(false);
+      expect(isEndlessRoot(graph, "目的", r)).toBe(false); // 未指定の根はゴール
+      expect(isEndlessRoot(graph, "無い", r)).toBe(false);
+    }
+  });
+});
 
 describe("ゴールの判定", () => {
   test("入次数0は宣言しなくてもゴール", () => {

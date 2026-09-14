@@ -11,6 +11,7 @@ import {
   cyclicNodes,
   descendantOutline,
   descendantProgress,
+  effectiveDues,
   findCycles,
   findShortcuts,
   inDegree,
@@ -564,6 +565,79 @@ describe("最近の変更", () => {
       expect(ids({ key: "goal", dir: "asc" })).toEqual(["領収書", "家", "不動産", "ひっこし", "かいもの"]);
       expect(ids({ key: "goal", dir: "desc" })).toEqual(["家", "不動産", "領収書", "ひっこし", "かいもの"]);
     });
+  });
+});
+
+describe("期限の伝播", () => {
+  const due = (graph: Graph) => {
+    const m = effectiveDues(graph);
+    return (id: string) => {
+      const d = m.get(id);
+      return d ? `${d.date}@${d.from}` : undefined;
+    };
+  };
+
+  test("上の期限が前提と中身へ下りる。自分で書いた期限は自分から", () => {
+    const graph = g("引っ越し -> 家を見つける -> 不動産に行く, 引っ越し -> [荷造り], 無関係");
+    graph.nodes["引っ越し"]!.due = "2027-03-31";
+    const at = due(graph);
+    expect(at("引っ越し")).toBe("2027-03-31@引っ越し");
+    expect(at("家を見つける")).toBe("2027-03-31@引っ越し");
+    expect(at("不動産に行く")).toBe("2027-03-31@引っ越し"); // 2段下まで
+    expect(at("荷造り")).toBe("2027-03-31@引っ越し"); // contains も同じ
+    expect(at("無関係")).toBeUndefined();
+  });
+
+  test("早い方が効く。自分の期限が早ければ自分、上が早ければ上", () => {
+    const graph = g("引っ越し -> 家を見つける -> 不動産に行く, 引っ越し -> 退去の連絡");
+    graph.nodes["引っ越し"]!.due = "2027-03-31";
+    graph.nodes["家を見つける"]!.due = "2027-02-28"; // 上より早い
+    graph.nodes["退去の連絡"]!.due = "2027-05-01"; // 上より遅い（上に間に合わない）
+    const at = due(graph);
+    expect(at("家を見つける")).toBe("2027-02-28@家を見つける");
+    expect(at("不動産に行く")).toBe("2027-02-28@家を見つける"); // 近い方の早い期限
+    expect(at("退去の連絡")).toBe("2027-03-31@引っ越し");
+  });
+
+  test("合流点は一番早い期限を受け取る", () => {
+    const graph = g("確定申告 -> 領収書整理, 引っ越し -> 領収書整理");
+    graph.nodes["確定申告"]!.due = "2027-03-15";
+    graph.nodes["引っ越し"]!.due = "2027-03-31";
+    expect(due(graph)("領収書整理")).toBe("2027-03-15@確定申告");
+  });
+
+  test("達成済みは伝えない・受け取らない・中継しない", () => {
+    const graph = g("済んだ目的 -> A, 目的 -> 済んだ中継 -> B, 目的 -> 済んだ末端");
+    graph.nodes["済んだ目的"]!.due = "2027-01-01";
+    graph.nodes["済んだ目的"]!.satisfied = true;
+    graph.nodes["目的"]!.due = "2027-02-01";
+    graph.nodes["済んだ中継"]!.satisfied = true;
+    graph.nodes["済んだ末端"]!.satisfied = true;
+    const at = due(graph);
+    expect(at("A")).toBeUndefined();
+    expect(at("済んだ中継")).toBeUndefined();
+    expect(at("B")).toBeUndefined();
+    expect(at("済んだ末端")).toBeUndefined();
+    expect(at("目的")).toBe("2027-02-01@目的"); // 陽性対照
+  });
+
+  test("輪があっても止まり、書式の違う期限は伝えない", () => {
+    const graph = g("A -> B -> C -> A, 曖昧 -> D");
+    graph.nodes["A"]!.due = "2027-04-01";
+    graph.nodes["曖昧"]!.due = "来年の春";
+    const at = due(graph);
+    expect(at("C")).toBe("2027-04-01@A");
+    expect(at("D")).toBeUndefined();
+  });
+
+  test("検索の行にも伝わった期限と出どころが載る", () => {
+    const graph = g("引っ越し -> 家を見つける");
+    graph.nodes["引っ越し"]!.due = "2027-03-31";
+    const hits = search(graph, buildReverseIndex(graph)).hits;
+    const hit = (id: string) => hits.find((h) => h.id === id)!;
+    expect(hit("家を見つける")).toMatchObject({ due: "2027-03-31", dueFrom: "引っ越し" });
+    expect(hit("引っ越し").due).toBe("2027-03-31");
+    expect(hit("引っ越し").dueFrom).toBeUndefined();
   });
 });
 

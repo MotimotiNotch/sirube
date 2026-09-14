@@ -883,11 +883,11 @@ describe("改名と削除", () => {
   test("削除は一度受け止める。やめれば消えない", async () => {
     await openMore();
     findButton("inspector", "このノードを削除")!.click();
-    expect(text("inspector")).toContain("取り消せません");
+    expect(text("inspector")).toContain("を削除します");
     findButton("inspector", "やめる")!.click();
     await tick();
     expect(findButton("root-list", "確定申告")).toBeTruthy();
-    expect(text("inspector")).not.toContain("取り消せません");
+    expect(text("inspector")).not.toContain("を削除します");
   });
 
   test("削除で目的が生えるなら、押す前に件数と名前を出す", async () => {
@@ -908,6 +908,24 @@ describe("改名と削除", () => {
     expect(findButton("root-list", "確定申告")).toBeUndefined();
     // 参照だけ残ると自動解決が空ノードを作り直してしまう
     expect(findButton("root-list", "領収書整理")).toBeTruthy();
+  });
+
+  test("削除はヘッダーの「戻す」で戻り、目的と前提の繋がりも元に戻る", async () => {
+    await openMore();
+    findButton("inspector", "このノードを削除")!.click();
+    findButton("inspector", "削除する")!.click();
+    await tick();
+    expect($("undo-btn").classList.contains("hidden")).toBe(false);
+    expect($("undo-btn").title).toContain("「確定申告」の削除");
+    expect(findButton("root-list", "領収書整理")).toBeTruthy(); // 陽性対照（消すと目的に湧く）
+
+    $("undo-btn").click();
+    await tick();
+    expect(findButton("root-list", "確定申告")).toBeTruthy();
+    // 領収書整理は再び確定申告の前提になるので、目的の一覧からは消える
+    expect(findButton("root-list", "領収書整理")).toBeUndefined();
+    expect($("undo-btn").classList.contains("hidden")).toBe(true);
+    expect(text("toast-stack")).toContain("戻しました");
   });
 });
 
@@ -1095,8 +1113,13 @@ describe("まとめて追加（DSL）", () => {
     ) as unknown as SVGGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await tick();
     // 領収書整理 を待っているのは、差し込んだ方だけ。元の親からは外れている。
-    expect(text("inspector")).toContain("レシートを箱から出す");
-    expect(text("inspector")).not.toContain("確定申告");
+    // **パネル全体ではなく「これを待っている」の欄で見る。** 確定申告の期限が
+    // 伝わってくるので（2026-09-14）、パネルのどこかには「確定申告」が出る。
+    const waiting = Array.from($("inspector").querySelectorAll(".insp-section")).find((s) =>
+      (s.querySelector("h4")?.textContent ?? "").includes("これを待っている"),
+    );
+    expect(waiting?.textContent ?? "").toContain("レシートを箱から出す");
+    expect(waiting?.textContent ?? "").not.toContain("確定申告");
   });
 
   test("差し込みで同じ名前は作らせない", async () => {
@@ -1242,6 +1265,14 @@ describe("まとめて追加（DSL）", () => {
     await tick();
     // 親は「領収書整理」の1つだけになり、合流点ではなくなる
     expect(text("center-body")).not.toContain("合流 2");
+
+    // 外した線はヘッダーの「戻す」で戻り、合流点に戻る（2026-09-14）
+    expect($("undo-btn").classList.contains("hidden")).toBe(false);
+    $("undo-btn").click();
+    await tick();
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    expect(text("center-body")).toContain("合流 2");
   });
 
   test("「そのまま」なら何も外さない", async () => {
@@ -2250,6 +2281,46 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     expect(text("inspector")).toContain("地図から外してあります");
   });
 
+  describe("サイドバーの目的は地図と同じゴールを並べる", () => {
+    const sidebar = (): string[] => buttonsIn("root-list").map((b) => b.textContent ?? "");
+
+    test("地図から外した根はサイドバーからも消える", async () => {
+      expect(sidebar().some((t) => t.includes("Sirube をリリースする"))).toBe(true); // 陽性対照
+      findButton("root-list", "Sirube をリリースする")!.click();
+      await tick();
+      await openMore();
+      findButton("inspector", "地図から外す")!.click();
+      await tick();
+      expect(sidebar().some((t) => t.includes("Sirube をリリースする"))).toBe(false);
+    });
+
+    test("地図から外した根（終わらない根）は割合を出さず、達成数と全体の数を別々に並べる", async () => {
+      findButton("root-list", "Sirube をリリースする")!.click();
+      await tick();
+      // 陽性対照: 外す前は `n/m` と進捗バーが出ている
+      expect($("inspector").querySelector(".progress-bar")).toBeTruthy();
+      expect(text("inspector")).toMatch(/\d+\/\d+/);
+      await openMore();
+      findButton("inspector", "地図から外す")!.click();
+      await tick();
+      expect($("inspector").querySelector(".progress-bar")).toBeNull();
+      expect(text("inspector")).not.toMatch(/\d+\/\d+/);
+      // 全体の数は消さない（「分母が伸びていくのを見る」使い方がある）
+      expect(text("inspector")).toMatch(/達成 \d+ 件 ／ 全 \d+ 件/);
+    });
+
+    test("中腹に立てたゴールが並び、そこにいる間はその行が光る", async () => {
+      expect(sidebar().some((t) => t.includes("Tauriシェル"))).toBe(false); // 陽性対照
+      await declareTauriGoal();
+      expect(sidebar().some((t) => t.includes("Tauriシェル"))).toBe(true);
+      findButton("root-list", "Tauriシェル")!.click();
+      await tick();
+      const active = buttonsIn("root-list").filter((b) => b.classList.contains("active"));
+      expect(active.map((b) => b.textContent ?? "").join()).toContain("Tauriシェル");
+      expect(active.length).toBe(1);
+    });
+  });
+
   test("「俯瞰」と「地図」は1つの入れ物に並ぶ（別々に右寄せすると間が空く）", async () => {
     await declareTauriGoal();
     const holders = new Set([toggle("俯瞰"), toggle("地図")].map((b) => b.parentElement));
@@ -2467,5 +2538,30 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     await declareTauriGoal();
     // 宣言したゴールにも付箋の列が出る。以前は入次数0だけが対象だった。
     expect($("inspector").querySelectorAll(".swatch").length).toBeGreaterThan(0);
+  });
+});
+
+describe("期限の伝播", () => {
+  test("上の期限は前提の行に破線で出て、詳細パネルは出どころを文字で言う", async () => {
+    // サンプルの「確定申告」は期限 2027-03-15 を持ち、「領収書整理」を前提にしている。
+    const row = Array.from($("center-body").querySelectorAll(".hit")).find((r) =>
+      (r.querySelector(".hit-name")?.textContent ?? "") === "領収書整理",
+    )!;
+    const badge = row.querySelector(".due-inherited") as HTMLElement | null;
+    expect(badge?.textContent).toBe("2027-03-15");
+    expect(badge?.title).toContain("確定申告");
+
+    (row.querySelector(".hit-main") as HTMLButtonElement).click();
+    await tick();
+    expect(text("inspector")).toContain("期限 2027-03-15");
+    expect(text("inspector")).toContain("「確定申告」の期限から");
+  });
+
+  test("自分で書いた期限は破線にしない", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    expect(text("inspector")).toContain("期限 2027-03-15");
+    expect($("inspector").querySelector(".due-inherited")).toBeNull();
+    expect(text("inspector")).not.toContain("の期限から");
   });
 });

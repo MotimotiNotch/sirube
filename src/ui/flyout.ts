@@ -18,6 +18,7 @@
 
 import { descendantOutline, descendantProgress, type OutlineItem } from "../core/engine.ts";
 import type { Graph } from "../core/model.ts";
+import { isEndlessRoot } from "../core/goals.ts";
 import { h, iconSpan } from "./dom.ts";
 
 /** 字下げの上限。これ以上は深さを数字で出す——字下げを積み続けると横に溢れ、
@@ -103,7 +104,10 @@ export function showOutlineFlyout(
   const c = descendantProgress(graph, nodeId);
   const head = h("div", { class: "fly-head" });
   head.append(iconSpan("layers", 12), h("span", {}, ["下にあるもの（クリックで直接ジャンプ）"]));
-  head.append(h("span", { class: "fly-count" }, [`${c.done}/${c.total}`]));
+  // 終わらない根は分数にしない（`isEndlessRoot`）。件数は2つとも残す。
+  head.append(
+    h("span", { class: "fly-count" }, [isEndlessRoot(graph, nodeId) ? `達成 ${c.done} ／ 全 ${c.total}` : `${c.done}/${c.total}`]),
+  );
 
   fly.replaceChildren(head, ...items.map((it) => row(graph, it, onPick)));
   fly.classList.remove("hidden");

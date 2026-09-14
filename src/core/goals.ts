@@ -60,6 +60,32 @@ export function isGoal(g: Graph, id: string, rev: ReverseIndex): boolean {
   return node.goal === true || inDegree(id, rev) === 0;
 }
 
+/**
+ * 終わらない根か。**`goal: false` を書いた入次数0のノード。**
+ *
+ * `哲学を体現する` のような一生続く目的は、進捗 `38/77` の**割合**が意味を持たない
+ * （2026-09-14、のっち）。フィールドは足さない——`AGENTS.md` は `goal: false` を
+ * 「終わらないものが根に居るとき」に書くと決めてあり、書いた時点で本人が
+ * 「これは終わらない」と言っている。UI はここだけ見て、**割合（分数・バー・弧）
+ * を出さない**。
+ *
+ * **全体の件数は消さない。** 実 vault の `哲学を体現する` のメモは「分母が伸びて
+ * いくのを見るための場所」——終わらないものでは、分母は「どこまで」ではなく
+ * 「どれだけ広がったか」を言っている。分数にすると完了へ向かう進捗に読めるので、
+ * 達成数と全体の数を別々に並べる（`達成 36 件 ／ 全 79 件`）。
+ *
+ * 中腹の終わらないもの（`絵を描き続ける` 等）は拾わない。`goal: false` は
+ * 入次数0でしか書かない決まり（`setGoal`）なので、中腹には手がかりが無い。
+ *
+ * 逆引きを持っていない呼び手（フライアウト）のために `rev` は省ける。
+ * 省くと参照を全部舐めて入次数を数える。
+ */
+export function isEndlessRoot(g: Graph, id: string, rev?: ReverseIndex): boolean {
+  if (g.nodes[id]?.goal !== false) return false;
+  if (rev) return inDegree(id, rev) === 0;
+  return !Object.values(g.nodes).some((n) => n.requires.includes(id) || n.contains.includes(id));
+}
+
 export function goalIds(g: Graph, rev: ReverseIndex): string[] {
   return Object.keys(g.nodes)
     .filter((id) => isGoal(g, id, rev))

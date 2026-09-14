@@ -3,7 +3,7 @@
 // サーバは無い。ストアもエンジンもここ（フロント）で動き、ファイルアクセスだけ
 // `SirubeFs` の実装を差し替える（開発中はメモリ、Tauri ではプラグイン fs）。
 
-import { analyzeCycles, buildReverseIndex, canUndo, findShortcuts, hasChildren, inDegree, progress, resolveState, roots, type CycleInfo, type ReverseIndex, type TogglePlan, type ToggleUndo } from "../core/engine.ts";
+import { analyzeCycles, buildReverseIndex, canUndo, findShortcuts, hasChildren, inDegree, progress, resolveState, type CycleInfo, type ReverseIndex, type TogglePlan, type ToggleUndo } from "../core/engine.ts";
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
 import { enclosingGoal, goalLayer, isGoal, mapSeeds, type GoalLayer } from "../core/goals.ts";
 import { parseDsl } from "../core/dsl.ts";
@@ -18,7 +18,7 @@ import {
   type RecentSort,
 } from "../core/search.ts";
 import type { SirubeFs } from "../store/fs.ts";
-import { MarkdownGraphStore } from "../store/store.ts";
+import { canUndoStructure, MarkdownGraphStore, type StructureUndo } from "../store/store.ts";
 import { clear, el, h, iconSpan, stateDot, toast } from "./dom.ts";
 import { hideFlyout } from "./flyout.ts";
 import { closeContextMenu, openContextMenu, type MenuItem, type MenuTarget } from "./context-menu.ts";
@@ -353,9 +353,14 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       undoBtn.removeAttribute("title");
       return;
     }
-    const target = lastUndo.entries.find((e) => e.id === lastUndo!.target);
+    if (lastUndo.kind === "structure") {
+      undoBtn.title = `${lastUndo.undo.label}を戻す`;
+      return;
+    }
+    const toggled = lastUndo.undo;
+    const target = toggled.entries.find((e) => e.id === toggled.target);
     const dir = target?.after === false ? "取り消し" : "達成";
-    undoBtn.title = `「${nameOf(lastUndo.target)}」の${dir}を戻す（${lastUndo.entries.length}件）`;
+    undoBtn.title = `「${nameOf(toggled.target)}」の${dir}を戻す（${toggled.entries.length}件）`;
   };
 
   const reconcileBtn = el<HTMLButtonElement>("reconcile-btn");
@@ -678,10 +683,13 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     openTogglePreview(plan);
   };
 
-  /** 直前のトグルの控え。**1手だけ**持つ（履歴は持たない——2手前まで戻せると、
+  /** 直前の操作の控え。**1手だけ**持つ（履歴は持たない——2手前まで戻せると、
    *  どこまで戻ったかを画面に出す責任が生まれる。ここで守りたいのは「今の1回が
-   *  間違いだった」であって、作業履歴ではない）。 */
-  let lastUndo: ToggleUndo | undefined;
+   *  間違いだった」であって、作業履歴ではない）。
+   *
+   *  2026-09-14 から削除と外すも入る（それまでは達成のトグルだけで、消したものは
+   *  アプリから戻せなかった）。種類が違う控えでも、持つのは最後の1つだけ。 */
+  let lastUndo: { kind: "toggle"; undo: ToggleUndo } | { kind: "structure"; undo: StructureUndo } | undefined;
 
   /**
    * 直前のトグルを戻す。**カスケードは走らせず、書いた値をそのまま巻き戻す。**
@@ -691,15 +699,25 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    * つかない。
    */
   const undoLast = async (): Promise<void> => {
-    const undo = lastUndo;
-    if (!undo) return;
-    if (!canUndo(state.graph, undo)) {
+    const last = lastUndo;
+    if (!last) return;
+    const stillValid =
+      last.kind === "toggle" ? canUndo(state.graph, last.undo) : canUndoStructure(state.graph, last.undo);
+    if (!stillValid) {
       lastUndo = undefined;
       render();
       toast("ファイルが外で変わったので、この分は戻せません");
       return;
     }
-    const changed = await store.undoToggle(state.graph, undo);
+    if (last.kind === "structure") {
+      await store.undoStructure(state.graph, last.undo);
+      lastUndo = undefined;
+      recompute();
+      render();
+      toast(`${last.undo.label}を戻しました`);
+      return;
+    }
+    const changed = await store.undoToggle(state.graph, last.undo);
     lastUndo = undefined;
     recompute();
     render();
@@ -720,7 +738,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     }
     const { changed, undo } = await store.applyToggle(state.graph, plan);
     // 連動したときだけ控えを残す。1件で済んだトグルは押し直せば元へ戻る。
-    lastUndo = changed.length > 1 ? undo : undefined;
+    lastUndo = changed.length > 1 ? { kind: "toggle", undo } : undefined;
     recompute();
     render();
     if (changed.length > 1) toast(`${changed.length} 件が連動して変わりました（ヘッダーの「戻す」で元に戻せます）`);
@@ -762,20 +780,23 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   const detach = async (parentId: string, childId: string): Promise<void> => {
     const parentName = nameOf(parentId);
     const childName = nameOf(childId);
-    if (!(await store.detachEdge(state.graph, parentId, childId))) return;
+    const undo = await store.detachEdge(state.graph, parentId, childId);
+    if (!undo) return;
+    lastUndo = { kind: "structure", undo };
     recompute();
     render();
-    // 戻し方まで言う。ここを消したまま忘れると、構造をどう戻すのか分からなくなる。
-    toast(`「${parentName}」から「${childName}」を外しました（まとめて追加に「${parentName} -> ${childName}」で戻せます）`);
+    // 戻し方まで言う。「戻す」は次の操作で上書きされるので、そのあとに戻したく
+    // なったときの書き方も残す。
+    toast(`「${parentName}」から「${childName}」を外しました（ヘッダーの「戻す」、またはまとめて追加に「${parentName} -> ${childName}」で戻せます）`);
   };
 
   /**
    * 右クリックのメニュー。**ここにしか無い操作は置かない**——全部どこかにある
    * ものの近道にする（入口が増えるほど、同じことを2通りで覚えることになる）。
    *
-   * 削除だけは載せない。取り消しが無く、消すと子が目的として湧く副作用もあるので、
-   * インスペクタの「押してから確認が出る」形のままにしてある。マウスの1動作の
-   * 近くに置くものではない。
+   * 削除だけは載せない。消すと子が目的として湧く副作用があり、戻せるのも直後の
+   * 1手だけ（2026-09-14 までは戻せなかった）なので、インスペクタの「押してから
+   * 確認が出る」形のままにしてある。マウスの1動作の近くに置くものではない。
    */
   const openMenu = (target: MenuTarget, x: number, y: number): void => {
     hideFlyout();
@@ -868,14 +889,15 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   const removeNode = async (id: string): Promise<void> => {
     // 名前は消す前に控える。削除後の graph には当然もう無い。
     const name = nameOf(id);
-    await store.deleteNode(state.graph, id);
+    const { undo } = await store.deleteNode(state.graph, id);
+    lastUndo = { kind: "structure", undo };
     if (state.focusId === id) state.focusId = undefined;
     if (state.selectedId === id) state.selectedId = undefined;
     state.trail = state.trail.filter((t) => t !== id);
     recompute();
     if (!state.focusId) state.mode = "list";
     render();
-    toast(`「${name}」を削除しました`);
+    toast(`「${name}」を削除しました（ヘッダーの「戻す」で戻せます）`);
   };
 
   // ---- モーダル ----------------------------------------------------------
@@ -1412,7 +1434,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       closeModal();
       // 1件ずつ確かめ直してから外す。出している間に外でファイルが変わり、
       // 唯一の繋がりになっていたものは切らない（ストア側で弾く）。
-      const done = await store.detachShortcuts(state.graph, shortcuts);
+      const { done, undo } = await store.detachShortcuts(state.graph, shortcuts);
+      if (undo) lastUndo = { kind: "structure", undo };
       recompute();
       render();
       if (done.length === 0) {
@@ -1422,8 +1445,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       const one = done.length === 1 ? done[0]! : undefined;
       toast(
         one
-          ? `「${nameOf(one.from)}」から「${nameOf(one.to)}」を外しました（まとめて追加に「${nameOf(one.from)} -> ${nameOf(one.to)}」で戻せます）`
-          : `直接の線を ${done.length} 本外しました`,
+          ? `「${nameOf(one.from)}」から「${nameOf(one.to)}」を外しました（ヘッダーの「戻す」、またはまとめて追加に「${nameOf(one.from)} -> ${nameOf(one.to)}」で戻せます）`
+          : `直接の線を ${done.length} 本外しました（ヘッダーの「戻す」で戻せます）`,
       );
     });
     actions.append(keep, ok);
@@ -1644,10 +1667,16 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
 
     const list = el("root-list");
     clear(list);
-    const rootIds = roots(state.graph, state.rev);
+    // 並べるのは地図と入口ファイルと同じ「ゴール」（2026-09-14）。入次数0で
+    // 拾っていた頃は、地図から外した終わらない根が居座り、中腹に宣言した
+    // ゴールは出なかった——「ゴール」の答えが画面ごとに違っていた。
+    const rootIds = state.goals.ids;
     if (rootIds.length === 0) {
       const empty = h("div", { class: "empty", style: "padding:12px 4px;font-size:12px" });
-      empty.append(h("div", {}, ["まだ目的がありません"]));
+      // ノードはあるのにゴールが無いのは、根を全部地図から外したとき。
+      // 「まだ無い」と言うと、作ったものが消えたように読める。
+      const hasNodes = Object.keys(state.graph.nodes).length > 0;
+      empty.append(h("div", {}, [hasNodes ? "地図に出している目的がありません" : "まだ目的がありません"]));
       // 文言だけ出して終わらない。ここが起動直後の画面なので、次の操作が
       // 同じ場所に無いと手が止まる。
       const make = h("button", { class: "btn", type: "button", style: "margin-top:8px" });
@@ -1657,10 +1686,17 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       list.append(empty);
       return;
     }
+    // 光らせるのは、今いる場所に一番近いゴール。中腹のゴールが並ぶようになったので、
+    // 経路の先頭（根）で比べると、潜った先のゴールを押しても根の行が光る。
+    const here = state.scopeId ?? state.focusId;
+    const activeGoal =
+      (state.mode === "graph" || state.scopeId) && here
+        ? [...state.trail, here].reverse().find((id) => rootIds.includes(id))
+        : undefined;
     for (const id of rootIds) {
       const p = progress(state.graph, id);
       const btn = h("button", {
-        class: `root-item${(state.mode === "graph" || state.scopeId) && (state.trail[0] ?? state.focusId) === id ? " active" : ""}`,
+        class: `root-item${activeGoal === id ? " active" : ""}`,
         type: "button",
       });
       // 付箋は状態ドットの手前、行の縁に細く出す。丸（状態）と棒（付箋）で

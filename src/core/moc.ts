@@ -16,6 +16,7 @@
 
 import {
   collectMembers,
+  effectiveDues,
   inDegree,
   progress,
   resolveState,
@@ -174,8 +175,13 @@ function stuckReason(g: Graph, rootId: string, cycles: CycleInfo): string {
   return "前提が全部ふさがっています。分解が足りないか、依存の向きが間違っている可能性があります。";
 }
 
+/** 期限の添え書き。**アプリと同じく上から伝わった期限も出す**（`effectiveDues`）
+ *  ——入口ファイルとアプリで期限の答えが違うと、どちらを信じるかの判断が要る。
+ *  1行ごとに全体を塗り直すが、生成は保存のたびに1回で、ノード数も数百に届かない。 */
 function dueSuffix(g: Graph, id: string): string {
-  const due = g.nodes[id]?.due;
+  const eff = effectiveDues(g).get(id);
+  if (eff && eff.from !== id) return `（期限 ${eff.date}、${g.nodes[eff.from]?.name ?? eff.from} から）`;
+  const due = eff?.date ?? g.nodes[id]?.due;
   return due === undefined || due === "" ? "" : `（期限 ${due}）`;
 }
 

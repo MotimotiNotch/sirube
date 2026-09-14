@@ -925,6 +925,12 @@ body.no-inspector #inspector-resizer {
 .insp-confirm-text { font-size: 13px; color: var(--fg); }
 .insp-confirm-note { margin-top: 4px; font-size: 12px; color: var(--st-cyclic); }
 .insp-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+/* 上から伝わった期限（2026-09-14）。枠を破線にして、自分で書いた期限と見分ける。
+ * 色は変えない——期限は警告しない方針なので、赤や強い色を当てると催促に見える。 */
+/* 枠の色は一段濃くする。既定の `--border` のままだと暗い画面で破線が背景に溶け、
+ * 一覧の行では出どころを見分ける手がかりが消えた（実機で測った枠色 rgb(43,46,52)）。 */
+.hit-indegree.due-inherited { border-style: dashed; border-color: var(--fg-faint); }
+.insp-due-from { margin: -8px 0 12px; font-size: 11px; color: var(--fg-faint); }
 .insp-section { margin-top: 18px; }
 .insp-section h4 {
   font-size: 11px;

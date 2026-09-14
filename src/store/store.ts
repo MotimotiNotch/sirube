@@ -184,7 +184,14 @@ export class MarkdownGraphStore {
     throw new Error(`ノード id を ${MINT_ATTEMPTS} 回採番できませんでした${detail}`);
   }
 
-  async deleteNode(graph: Graph, id: string): Promise<string[]> {
+  /** 消す。**戻すための控えも一緒に返す**（`applyToggle` と同じ理由——控えは
+   *  書き換える前のグラフからしか取れない）。控えは消すノードと、参照を外される側。 */
+  async deleteNode(graph: Graph, id: string): Promise<{ touched: string[]; undo: StructureUndo }> {
+    const referrers = Object.keys(graph.nodes).filter(
+      (otherId) => graph.nodes[otherId]!.requires.includes(id) || graph.nodes[otherId]!.contains.includes(id),
+    );
+    const before = snapshotNodes(graph, [id, ...referrers]);
+    const name = graph.nodes[id]?.name ?? id;
     delete graph.nodes[id];
     await this.fs.deleteNode(id);
     // 参照だけ残ると「リンク切れ」になる。自動解決が空ノードを作り直して
@@ -197,7 +204,7 @@ export class MarkdownGraphStore {
       if (other.requires.length + other.contains.length !== before) touched.push(otherId);
     }
     await this.persist(graph, touched);
-    return touched;
+    return { touched, undo: sealUndo(graph, `「${name}」の削除`, before) };
   }
 
   /** ワンタップトグル。カスケードで巻き込まれたノードも一緒に書く。 */
@@ -213,18 +220,21 @@ export class MarkdownGraphStore {
    * あれば往復する**。あちらが付け替えを1操作にまとめたのは、名前で繋ぐ入口が
    * 無かったからだと思われる。
    *
-   * 戻ってくる値は「実際に切ったか」。無い繋がりを指定されても黙って何もしない
-   * ——UI は逆引きから作った一覧を出しているので、そこにあるものしか渡らない。
+   * 戻ってくる値は、切ったなら戻すための控え、切らなかったら `undefined`。無い
+   * 繋がりを指定されても黙って何もしない——UI は逆引きから作った一覧を出して
+   * いるので、そこにあるものしか渡らない。
    */
-  async detachEdge(graph: Graph, parentId: string, childId: string): Promise<boolean> {
+  async detachEdge(graph: Graph, parentId: string, childId: string): Promise<StructureUndo | undefined> {
     const parent = graph.nodes[parentId];
-    if (!parent) return false;
+    if (!parent) return undefined;
+    const snap = snapshotNodes(graph, [parentId]);
     const before = parent.requires.length + parent.contains.length;
     parent.requires = parent.requires.filter((id) => id !== childId);
     parent.contains = parent.contains.filter((id) => id !== childId);
-    if (parent.requires.length + parent.contains.length === before) return false;
+    if (parent.requires.length + parent.contains.length === before) return undefined;
     await this.persist(graph, [parentId]);
-    return true;
+    const childName = graph.nodes[childId]?.name ?? childId;
+    return sealUndo(graph, `「${parent.name}」から「${childName}」を外したの`, snap);
   }
 
   /**
@@ -232,7 +242,11 @@ export class MarkdownGraphStore {
    * 確認を出している間に外でファイルが変わり、もう別の道が無くなっていたら、
    * それは近道ではなく唯一の繋がりなので切らない。返り値は実際に外したもの。
    */
-  async detachShortcuts(graph: Graph, shortcuts: readonly Shortcut[]): Promise<Shortcut[]> {
+  async detachShortcuts(
+    graph: Graph,
+    shortcuts: readonly Shortcut[],
+  ): Promise<{ done: Shortcut[]; undo?: StructureUndo }> {
+    const snap = snapshotNodes(graph, [...new Set(shortcuts.map((s) => s.from))]);
     const done: Shortcut[] = [];
     for (const s of shortcuts) {
       if (shortcutVia(graph, s.from, s.to) === undefined) continue;
@@ -240,8 +254,49 @@ export class MarkdownGraphStore {
       node.requires = node.requires.filter((id) => id !== s.to);
       done.push(s);
     }
-    await this.persist(graph, [...new Set(done.map((s) => s.from))]);
-    return done;
+    const touched = [...new Set(done.map((s) => s.from))];
+    await this.persist(graph, touched);
+    if (done.length === 0) return { done };
+    // 控えは実際に書き換えたノードだけに絞る。触っていないものまで照合すると、
+    // その後に外で書かれただけで戻せなくなる。
+    const before = Object.fromEntries(touched.map((id) => [id, snap[id] ?? null]));
+    return { done, undo: sealUndo(graph, `近道 ${done.length} 本を外したの`, before) };
+  }
+
+  /**
+   * 構造の控え（削除・外す）を戻す。**書いた直後の中身がそのまま残っているものだけ**
+   * ——1件でも外で書き換わっていたら何も書かずに `false`（`undoToggle` と同じ規則）。
+   *
+   * 消したノードは同じ id で作り直す。番号は、消している間に作られたノードが
+   * 同じ番号を取っていたら振り直す（番号は口に出して指す札で、重なると指せない）。
+   */
+  async undoStructure(graph: Graph, undo: StructureUndo): Promise<boolean> {
+    if (!canUndoStructure(graph, undo)) return false;
+    // 先にメモリへ全部戻してから書く。書き出しは参照の横に名前のコメント（`# 名前`）を
+    // 付けるので、戻す途中のグラフで書くと、まだ戻っていない相手の名前が引けずに
+    // コメントが落ちる（実機で、戻したファイルが元と1行だけ違った）。
+    const recreate: string[] = [];
+    const rewrite: string[] = [];
+    for (const [id, snap] of Object.entries(undo.before)) {
+      if (snap === null) continue; // 操作の前に無かったものは、今回の操作では作らない
+      const node = structuredClone(snap);
+      if (!graph.nodes[id]) {
+        const clash = Object.values(graph.nodes).some((n) => n.number !== undefined && n.number === node.number);
+        if (clash) node.number = this.nextNumber(graph);
+        recreate.push(id);
+      } else {
+        rewrite.push(id);
+      }
+      graph.nodes[id] = node;
+    }
+    const nameOf = (refId: string): string | undefined => graph.nodes[refId]?.name;
+    for (const id of recreate) {
+      const node = graph.nodes[id]!;
+      await this.fs.createNode(id, serializeNodeFile(node, nameOf));
+      node.mtimeMs = await this.fs.statNode(id);
+    }
+    await this.persist(graph, rewrite);
+    return true;
   }
 
   /**
@@ -496,6 +551,47 @@ export function resolveReferences(graph: Graph, issues: { id: string; problems: 
 
 /** id の採番をあきらめるまでの回数。無限ループにはしない。 */
 const MINT_ATTEMPTS = 5;
+
+/**
+ * 構造を変える操作（削除・外す）の控え（2026-09-14）。
+ *
+ * それまで「戻す」は直前の達成トグル1回だけで、**削除と外すは戻せなかった**。
+ * vault は git 管理になったので最後の砦はあるが、アプリの外へ出ないと戻せない。
+ * 1手だけ持つ方針（`lastUndo`）はそのままで、戻せる操作を広げる。
+ *
+ * トグルの控え（`ToggleUndo`）は `satisfied` の前後だけで足りるが、構造は
+ * 参照の並びや消えたファイルそのものを戻すので、**ノードを丸ごと控える**。
+ * 照合は**ファイルに書く中身**（`serializeNodeFile`）で比べる——読み直しで
+ * オブジェクトが差し替わっても、中身が同じなら「外は触っていない」。
+ */
+export interface StructureUndo {
+  /** 何を戻すか。「◯◯を戻す」の◯◯に入る。 */
+  label: string;
+  /** 操作の前のノード。`null` はその時点で無かった。 */
+  before: Record<string, Node | null>;
+  /** 操作の直後の中身。`null` は消えた。外で書き換わったかの照合に使う。 */
+  after: Record<string, string | null>;
+}
+
+function snapshotNodes(graph: Graph, ids: readonly string[]): Record<string, Node | null> {
+  const out: Record<string, Node | null> = {};
+  for (const id of ids) out[id] = graph.nodes[id] ? structuredClone(graph.nodes[id]!) : null;
+  return out;
+}
+
+/** 参照のコメント（`# 名前`）は照合に入れない。参照先を改名しただけで戻せなくなる。 */
+const contentOf = (node: Node | undefined): string | null => (node ? serializeNodeFile(node) : null);
+
+function sealUndo(graph: Graph, label: string, before: Record<string, Node | null>): StructureUndo {
+  const after: Record<string, string | null> = {};
+  for (const id of Object.keys(before)) after[id] = contentOf(graph.nodes[id]);
+  return { label, before, after };
+}
+
+/** まだ戻せるか。控えた全ノードが、操作の直後の中身のまま残っているときだけ。 */
+export function canUndoStructure(graph: Graph, undo: StructureUndo): boolean {
+  return Object.entries(undo.after).every(([id, content]) => contentOf(graph.nodes[id]) === content);
+}
 
 export interface BulkResult {
   created: string[];

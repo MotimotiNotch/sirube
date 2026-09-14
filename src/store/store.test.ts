@@ -198,11 +198,11 @@ describe("ストア", () => {
 
     // 確認を出している間に外で「家 -> 不動産」が消えた
     graph.nodes["家"]!.requires = [];
-    expect(await store.detachShortcuts(graph, [shortcut])).toEqual([]);
+    expect((await store.detachShortcuts(graph, [shortcut])).done).toEqual([]);
     expect(graph.nodes["引っ越し"]!.requires).toContain("不動産");
 
     graph.nodes["家"]!.requires = ["不動産"];
-    expect(await store.detachShortcuts(graph, [shortcut])).toEqual([shortcut]);
+    expect((await store.detachShortcuts(graph, [shortcut])).done).toEqual([shortcut]);
     expect(parseNodeFile("引っ越し", await fs.readNode("引っ越し"), 0).node.requires).toEqual(["家"]);
   });
 
@@ -216,6 +216,87 @@ describe("ストア", () => {
     await store.deleteNode(graph, "B");
     expect(graph.nodes["A"]!.requires).toEqual([]);
     expect(fs.files.has("B")).toBe(false);
+  });
+
+  describe("削除と外すを戻す", () => {
+    const setup = async () => {
+      const fs = new MemoryFs({
+        A: md("number: 1\nsatisfied: false\nrequires:\n  - B\ncontains:\n  - C", "Aのメモ"),
+        B: md("number: 2\nsatisfied: true\nrequires: []\ncontains: []", "Bのメモ"),
+        C: md("number: 3\nsatisfied: false\nrequires:\n  - B\ncontains: []"),
+      });
+      const store = new MarkdownGraphStore(fs);
+      const { graph } = await store.load();
+      return { fs, store, graph };
+    };
+
+    test("削除を戻すと、同じ id・番号・中身のファイルと、両方の親からの参照が戻る", async () => {
+      const { fs, store, graph } = await setup();
+      const original = await fs.readNode("B");
+      const { undo } = await store.deleteNode(graph, "B");
+      expect(fs.files.has("B")).toBe(false); // 陽性対照
+      expect(graph.nodes["C"]!.requires).toEqual([]);
+
+      expect(await store.undoStructure(graph, undo)).toBe(true);
+      expect(await fs.readNode("B")).toBe(original);
+      expect(graph.nodes["B"]!.number).toBe(2);
+      expect(graph.nodes["A"]!.requires).toEqual(["B"]);
+      expect(parseNodeFile("C", await fs.readNode("C"), 0).node.requires).toEqual(["B"]);
+    });
+
+    test("消したノード自身が参照を持っていても、名前のコメントまで元のファイルと一致する", async () => {
+      // 書き出しは参照の横に `# 名前` を付ける。戻す途中のグラフで書くと相手の
+      // 名前が引けずにコメントが落ちた（実機で1行だけ違った）。名前と id を
+      // 分けたノードで、アプリが書いた形のファイルから始める。
+      // コメントは参照先が ULID のときだけ付くので、id を ULID の形にする。
+      const P = `01M2F0SE1F${"0".repeat(15)}1`;
+      const Q = `01M2F0SE1F${"0".repeat(15)}2`;
+      const R = `01M2F0SE1F${"0".repeat(15)}3`;
+      const fs = new MemoryFs({
+        [P]: md(`name: 親\nnumber: 1\nsatisfied: false\nrequires:\n  - ${Q}\ncontains: []`),
+        [Q]: md(`name: 子\nnumber: 2\nsatisfied: false\nrequires:\n  - ${R}\ncontains: []`, "メモ"),
+        [R]: md("name: 孫\nnumber: 3\nsatisfied: false\nrequires: []\ncontains: []"),
+      });
+      const store = new MarkdownGraphStore(fs);
+      const { graph } = await store.load();
+      await store.persist(graph, Object.keys(graph.nodes));
+      const original = { P: await fs.readNode(P), Q: await fs.readNode(Q) };
+      expect(original.Q).toContain("# 孫"); // 陽性対照: コメントが付く形になっている
+
+      const { undo } = await store.deleteNode(graph, Q);
+      expect(await store.undoStructure(graph, undo)).toBe(true);
+      expect(await fs.readNode(Q)).toBe(original.Q);
+      expect(await fs.readNode(P)).toBe(original.P);
+    });
+
+    test("外すを戻すと親の参照が元に戻る。無い繋がりは切らず控えも返さない", async () => {
+      const { fs, store, graph } = await setup();
+      const undo = await store.detachEdge(graph, "A", "B");
+      expect(undo).toBeDefined();
+      expect(graph.nodes["A"]!.requires).toEqual([]);
+      expect(await store.undoStructure(graph, undo!)).toBe(true);
+      expect(parseNodeFile("A", await fs.readNode("A"), 0).node).toMatchObject({ requires: ["B"], contains: ["C"] });
+      expect(await store.detachEdge(graph, "A", "無い")).toBeUndefined();
+    });
+
+    test("外で書き換わっていたら何も書かない", async () => {
+      const { fs, store, graph } = await setup();
+      const { undo } = await store.deleteNode(graph, "B");
+      graph.nodes["A"]!.note = "外で書いた"; // 参照を外された側が、その後に書き換わった
+      expect(await store.undoStructure(graph, undo)).toBe(false);
+      expect(fs.files.has("B")).toBe(false);
+      expect(graph.nodes["A"]!.requires).toEqual([]);
+    });
+
+    test("消している間に同じ番号が取られていたら、戻したノードの番号を振り直す", async () => {
+      const { store, graph } = await setup();
+      const { undo } = await store.deleteNode(graph, "B");
+      const made = await store.createNode(graph, "新しく作った");
+      made.number = 2; // 空いた番号を別のノードが持っている状態を作る
+      expect(await store.undoStructure(graph, undo)).toBe(true);
+      expect(graph.nodes["B"]!.number).not.toBe(2);
+      expect(new Set(Object.values(graph.nodes).map((n) => n.number)).size).toBe(Object.keys(graph.nodes).length);
+    });
   });
 });
 

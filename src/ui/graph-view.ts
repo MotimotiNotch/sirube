@@ -9,7 +9,7 @@
 import { isGoalColor, type Graph, type NodeState } from "../core/model.ts";
 import type { ReverseIndex } from "../core/engine.ts";
 import { descendantProgress, hasChildren, resolveState } from "../core/engine.ts";
-import { betweenKey } from "../core/goals.ts";
+import { betweenKey, isEndlessRoot } from "../core/goals.ts";
 import { closeContextMenu, type MenuTarget } from "./context-menu.ts";
 import { hideFlyout, scheduleHideFlyout, showOutlineFlyout } from "./flyout.ts";
 import { consumeDragEnd, mountViewport } from "./graph-viewport.ts";
@@ -451,16 +451,23 @@ export function renderGraph(
     // `下にN` という文字を置き換えたもの。数は title へ逃がす。
     const below = descendantProgress(truth, b.id);
     if (below.total > 0) {
+      // 終わらない根は軌道だけ出して弧を描かない。弧の長さは「全体のどこまで」を
+      // 言うので、終わらないものでは嘘の割合になる。下に何かあることは軌道が言い、
+      // 件数はツールチップに2つとも残す（`isEndlessRoot`）。
+      // 地図の `rev` は商グラフのものなので、逆引きは渡さず実グラフから数える。
+      const endless = isEndlessRoot(truth, b.id);
       const ringR = r * 0.58;
       const circumference = 2 * Math.PI * ringR;
-      const frac = below.done / below.total;
+      const frac = endless ? 0 : below.done / below.total;
       const track = document.createElementNS(svgNs, "circle");
       track.setAttribute("class", "ring track");
       track.setAttribute("cx", String(cx));
       track.setAttribute("cy", String(MARK_CY));
       track.setAttribute("r", String(ringR));
       const ringTitle = document.createElementNS(svgNs, "title");
-      ringTitle.textContent = `下に ${below.done}/${below.total}`;
+      ringTitle.textContent = endless
+        ? `下で達成 ${below.done} 件 ／ 全 ${below.total} 件`
+        : `下に ${below.done}/${below.total}`;
       track.append(ringTitle);
       g.append(track);
       // 0% のときは軌道だけ。長さ0の破線は丸い点になって「少し進んでいる」

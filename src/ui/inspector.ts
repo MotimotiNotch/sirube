@@ -3,8 +3,8 @@
 // ここに置く操作は「分解する」「達成をトグルする」の2つが主役。
 // 分解こそがこのツールで人間にしかできないことなので、常に手の届く位置に置く。
 
-import { inDegree, progress, resolveState, type ReverseIndex } from "../core/engine.ts";
-import { isGoal } from "../core/goals.ts";
+import { effectiveDues, inDegree, progress, resolveState, type ReverseIndex } from "../core/engine.ts";
+import { isEndlessRoot, isGoal } from "../core/goals.ts";
 import { GOAL_COLORS, isGoalColor, type GoalColor, type Graph, type NodeState } from "../core/model.ts";
 import { nodeCreatedAt } from "../core/ulid.ts";
 import { COLOR_LABEL, formatDate, formatDateTime, h, iconSpan, stateBadge, stateDot } from "./dom.ts";
@@ -103,12 +103,34 @@ export function renderInspector(
     row.append(h("span", { class: "insp-number", title: "このノードの番号" }, [`#${node.number}`]));
   }
   row.append(stateBadge(state));
-  if (node.due) row.append(h("span", { class: "hit-indegree" }, [`期限 ${node.due}`]));
+  // 期限は上から伝わったものも出す（`effectiveDues`）。どこから来たかは文字で言う
+  // ——詳細パネルは読むための場所なので、ツールチップに隠さない。
+  const due = effectiveDues(graph).get(selectedId);
+  let dueFrom: HTMLElement | undefined;
+  if (due && due.from !== selectedId) {
+    const from = graph.nodes[due.from]?.name ?? due.from;
+    const own = node.due && node.due !== due.date ? `。自分の期限は ${node.due}` : "";
+    row.append(h("span", { class: "hit-indegree due-inherited" }, [`期限 ${due.date}`]));
+    dueFrom = h("div", { class: "insp-due-from" }, [`「${from}」の期限から${own}`]);
+  } else if (due || node.due) {
+    row.append(h("span", { class: "hit-indegree" }, [`期限 ${due?.date ?? node.due}`]));
+  }
   container.append(row);
+  if (dueFrom) container.append(dueFrom);
 
   // 進捗（自分を含む子孫の達成率）
   const p = progress(graph, selectedId);
-  if (p.total > 1) {
+  if (p.total > 1 && isEndlessRoot(graph, selectedId, rev)) {
+    // 終わらない根は割合（分数・バー）を出さない。件数は2つとも残す——
+    // 全体の数は「どこまで」ではなく「どれだけ広がったか」を言う（`isEndlessRoot`）。
+    const prow = h("div", { class: "insp-row" });
+    prow.append(
+      h("span", { class: "progress-label", title: "終わらない目的（地図から外してある根）なので、割合は出しません" }, [
+        `達成 ${p.done} 件 ／ 全 ${p.total} 件`,
+      ]),
+    );
+    container.append(prow);
+  } else if (p.total > 1) {
     const prow = h("div", { class: "insp-row" });
     const bar = h("div", { class: "progress-bar" });
     bar.append(h("div", { class: "progress-fill", style: `width:${Math.round((p.done / p.total) * 100)}%` }));
@@ -360,7 +382,11 @@ export function renderInspector(
       (childId) => graph.nodes[childId] && inDegree(childId, rev) === 1,
     );
     delBox.replaceChildren();
-    const warn = h("div", { class: "insp-confirm-text" }, [`「${node.name}」を削除します。取り消せません。`]);
+    // 戻せるのは直後の1手だけ（次に何か操作すると控えが入れ替わる）。「戻せます」
+    // とだけ書くと、いつでも戻せるように読める。
+    const warn = h("div", { class: "insp-confirm-text" }, [
+      `「${node.name}」を削除します。直後ならヘッダーの「戻す」で戻せます。`,
+    ]);
     delBox.append(warn);
     if (orphans.length > 0) {
       delBox.append(

@@ -159,7 +159,18 @@ export function renderList(
     if (hit.inDegree > 1) {
       meta.append(h("span", { class: "hit-indegree", title: `${hit.inDegree} 箇所から要求されている（片付けると複数が進む）` }, [`合流 ${hit.inDegree}`]));
     }
-    if (hit.due) meta.append(h("span", { class: "hit-indegree", title: "期限" }, [hit.due]));
+    // 上から伝わった期限は枠を破線にして、どこから来たかをツールチップで言う。
+    // 同じ見た目にすると、自分で書いていない日付を書いたように読める。
+    if (hit.due) {
+      const from = hit.dueFrom ? graph.nodes[hit.dueFrom]?.name ?? hit.dueFrom : undefined;
+      meta.append(
+        h(
+          "span",
+          { class: from ? "hit-indegree due-inherited" : "hit-indegree", title: from ? `「${from}」の期限から` : "期限" },
+          [hit.due],
+        ),
+      );
+    }
 
     if (recent) {
       // 表の形。合流・期限は列を持たない（見出しで並べ替える軸ではない）ので、
