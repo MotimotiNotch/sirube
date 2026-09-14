@@ -76,6 +76,30 @@ export function isUlid(s: string): boolean {
   return true;
 }
 
+/**
+ * id をまとめて振り直した最後の時刻（epoch ms）。これ以前の時刻を持つ id は、
+ * **ノードを作った時刻ではなく振り直した時刻**を持っている。
+ *
+ * 実 vault で2回あった: 2026-09-01 14:46 の ULID 移行（`migrate-ids`、12件が同じ
+ * ミリ秒）と、2026-09-09 22:57 に削除前の vault から戻したとき（28件が同じミリ秒）。
+ * 値は後者の id `01M237BYQJ...` の時刻そのもの。
+ *
+ * 作成日のためにフィールドを足さない（`AGENTS.md`「フィールドを増やさない」）。
+ * id に既に時刻があるので、2箇所に持つとずれたときに正が決まらなくなる。代わりに
+ * 「いつからの id なら信じてよいか」をここで1つ持つ。のっち 2026-09-14「今は
+ * 無いと思うから、今後新規で作成するものは」。
+ *
+ * ⚠️ 今後 id をまとめて振り直す（移行・復元）ことがあったら、この値を進める。
+ */
+export const REMINTED_UNTIL_MS = 1_788_962_274_034;
+
+/** ノードを作った時刻。**振り直した id（`REMINTED_UNTIL_MS` 以前）と、ULID でない
+ *  id は `undefined`**——知らないものを知っているように出さない。 */
+export function nodeCreatedAt(id: string): number | undefined {
+  const t = ulidTime(id);
+  return t !== undefined && t > REMINTED_UNTIL_MS ? t : undefined;
+}
+
 /** ULID に埋まっている生成時刻（epoch ms）。形式が違えば `undefined`。 */
 export function ulidTime(s: string): number | undefined {
   if (!isUlid(s)) return undefined;

@@ -6,6 +6,7 @@
 import { inDegree, progress, resolveState, type ReverseIndex } from "../core/engine.ts";
 import { isGoal } from "../core/goals.ts";
 import { GOAL_COLORS, isGoalColor, type GoalColor, type Graph, type NodeState } from "../core/model.ts";
+import { nodeCreatedAt } from "../core/ulid.ts";
 import { COLOR_LABEL, h, iconSpan, stateBadge, stateDot } from "./dom.ts";
 import type { MenuTarget } from "./context-menu.ts";
 import { renderNote } from "./note-view.ts";
@@ -325,6 +326,26 @@ export function renderInspector(
   }
   container.append(noteSec);
 
+  // 作成日と更新日（2026-09-14、のっち依頼）。**どちらもファイルに書かない。**
+  //  - 作成: id（ULID）に埋まった時刻。振り直した id は持っていないので出さない
+  //  - 更新: ファイルの mtime。構造の付け足しやカスケード、AI の書き込みでも進む
+  //    ——「最後にこのファイルが書き換わった日」であって、本人が触った日ではない
+  // 読む頻度は低いので、メモの下に小さく置く。日付だけ出し、時刻はツールチップ。
+  {
+    const created = nodeCreatedAt(selectedId);
+    const updated = node.mtimeMs > 0 ? node.mtimeMs : undefined;
+    if (created !== undefined || updated !== undefined) {
+      const dates = h("div", { class: "insp-dates" });
+      if (created !== undefined) {
+        dates.append(h("span", { title: `作成 ${formatDateTime(created)}` }, [`作成 ${formatDate(created)}`]));
+      }
+      if (updated !== undefined) {
+        dates.append(h("span", { title: `更新 ${formatDateTime(updated)}` }, [`更新 ${formatDate(updated)}`]));
+      }
+      container.append(dates);
+    }
+  }
+
   // 削除は押した瞬間に消え、参照の掃除まで走る。取り消しも無いので、その場で
   // 一度受け止める（2026-09-02 の棚卸し。押した瞬間に消えることを実機で確認した）。
   //
@@ -363,4 +384,18 @@ export function renderInspector(
 
   // 「その他」はパネルの一番下。畳んであるので、開かない限り1行しか取らない。
   container.append(more);
+}
+
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+
+/** 手元の時刻で `2026-09-14`。`due` と同じ書き方に揃える。 */
+export function formatDate(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** 手元の時刻で `2026-09-14 13:43`。 */
+export function formatDateTime(ms: number): string {
+  const d = new Date(ms);
+  return `${formatDate(ms)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }

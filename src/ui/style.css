@@ -721,6 +721,9 @@ body.no-inspector #inspector-resizer {
 /* インスペクタの補足行。操作の結果を1行で言う場所。 */
 .insp-note { margin: 6px 0 0; font-size: 11px; color: var(--fg-muted); line-height: 1.5; }
 
+/* 作成日・更新日。読む頻度が低いのでメモの下に小さく。 */
+.insp-dates { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 10px 0 0; font-size: 11px; color: var(--fg-muted); }
+
 /* --- 中身の一覧（フライアウト） ------------------------------------------ */
 
 /* グラフのペインは overflow:auto なので、この箱だけは body 直下に置いて

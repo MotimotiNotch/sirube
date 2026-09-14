@@ -1371,6 +1371,32 @@ describe("新しい目的", () => {
     expect(labels.filter((l) => l.includes("確定申告")).length).toBe(1);
   });
 
+  test("新しく作ったノードは詳細パネルに作成日と更新日が出る", async () => {
+    const { formatDate } = await import("./inspector.ts");
+    const before = formatDate(Date.now());
+    $("new-root-btn").click();
+    await tick();
+    const input = $("modal").querySelector("input") as HTMLInputElement;
+    input.value = "日付を確かめる";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await tick();
+    const after = formatDate(Date.now());
+
+    const dates = $("inspector").querySelector(".insp-dates")?.textContent ?? "";
+    // 日付をまたいだ瞬間に走っても落ちないよう、前後どちらかと一致すればよい
+    expect([`作成 ${before}`, `作成 ${after}`].some((s) => dates.includes(s))).toBe(true);
+    expect(dates).toContain("更新 ");
+  });
+
+  test("振り直した id のノードには作成日を出さず、更新日だけ出す", async () => {
+    // サンプルの id は 2026-08 の時刻を持つ（振り直し以前）。作った日を知らない
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    const dates = $("inspector").querySelector(".insp-dates")?.textContent ?? "";
+    expect(dates).not.toContain("作成");
+    expect(dates).toContain("更新 ");
+  });
+
   test("名前が空なら作らない", async () => {
     $("new-root-btn").click();
     await tick();

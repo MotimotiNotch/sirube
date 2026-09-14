@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isUlid, ulid, ulidTime, ULID_LENGTH } from "./ulid.ts";
+import { isUlid, nodeCreatedAt, REMINTED_UNTIL_MS, ulid, ulidTime, ULID_LENGTH } from "./ulid.ts";
 
 describe("ULID", () => {
   test("26文字・Crockford Base32 で、紛らわしい文字を含まない", () => {
@@ -45,5 +45,22 @@ describe("ULID", () => {
     expect(() => ulid(-1)).toThrow();
     expect(() => ulid(1.5)).toThrow();
     expect(() => ulid(281_474_976_710_656)).toThrow();
+  });
+});
+
+describe("作成日", () => {
+  test("振り直した後に作った id だけ、作成時刻を返す", () => {
+    const now = REMINTED_UNTIL_MS + 60_000;
+    expect(nodeCreatedAt(ulid(now))).toBe(now);
+  });
+
+  test("振り直した時刻そのもの・それ以前の id は知らないものとして返さない", () => {
+    // 実 vault の復元バッチ（28件が同じミリ秒）の id。作った日ではなく戻した日を持つ
+    expect(nodeCreatedAt("01M237BYQJZ73295AAR06C0J7E")).toBeUndefined();
+    expect(nodeCreatedAt(ulid(REMINTED_UNTIL_MS - 1))).toBeUndefined();
+  });
+
+  test("ULID でない id（移行前のファイル名）は返さない", () => {
+    expect(nodeCreatedAt("確定申告")).toBeUndefined();
   });
 });
