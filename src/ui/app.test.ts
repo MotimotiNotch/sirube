@@ -947,7 +947,7 @@ describe("まとめて追加（DSL）", () => {
     // （のっち 2026-09-03）。この文言は初回しか読まれないので、ここで道を示す。
     $("new-root-btn").click();
     const hint = $("modal").querySelector(".hint")!.textContent ?? "";
-    expect(hint).toContain("前提を一括追加");
+    expect(hint).toContain("「分解する」");
     // 画面に出ていない語（Chain View）は使わない。UI では「グラフ」と呼んでいる。
     expect(hint).not.toContain("Chain View");
   });
@@ -1180,7 +1180,7 @@ describe("まとめて追加（DSL）", () => {
       .join(" ");
 
   test("入れ子と合流をそのまま書き下せる", async () => {
-    // 「前提を一括追加」は requires のフラット1段だけ。contains の入れ子を
+    // 「分解する」の前提タブは requires のフラット1段だけ。contains の入れ子を
     // 作る道はここしかない。
     const ta = await openImport();
     type(ta, "機能を整える -> [一覧を整える] -> [Chain Viewを整える], 一覧を整える -> [進捗の重複を潰す], Chain Viewを整える -> [進捗の重複を潰す]");
@@ -1216,7 +1216,7 @@ describe("まとめて追加（DSL）", () => {
     // 親からの直接の線が残ると偽の合流点になる（のっち 2026-09-14）。
     findButton("root-list", "確定申告")!.click();
     await tick();
-    findButton("inspector", "前提を一括追加")!.click();
+    findButton("inspector", "分解する")!.click();
     await tick();
     const bulk = $("modal").querySelector("textarea") as HTMLTextAreaElement;
     type(bulk, "医療費の領収書を集める");
@@ -1281,7 +1281,7 @@ describe("前提の一括追加", () => {
   test("改行リストから複数の前提が作られ、グラフに反映される", async () => {
     findButton("root-list", "確定申告")!.click();
     await tick();
-    findButton("inspector", "前提を一括追加")!.click();
+    findButton("inspector", "分解する")!.click();
     await tick();
     expect($("modal-backdrop").classList.contains("hidden")).toBe(false);
 
@@ -1302,7 +1302,7 @@ describe("前提の一括追加", () => {
   test("中身タブに切り替えると問いが変わり、書きかけは持ち越される", async () => {
     findButton("root-list", "確定申告")!.click();
     await tick();
-    findButton("inspector", "前提を一括追加")!.click();
+    findButton("inspector", "分解する")!.click();
     await tick();
     const ta = $("modal").querySelector("textarea") as HTMLTextAreaElement;
     ta.value = "書類をそろえる";
@@ -1324,7 +1324,7 @@ describe("前提の一括追加", () => {
     // 改行で項目を区切る入力なので、確定でマウスへ往復させると分解が止まる。
     findButton("root-list", "確定申告")!.click();
     await tick();
-    findButton("inspector", "前提を一括追加")!.click();
+    findButton("inspector", "分解する")!.click();
     await tick();
     const ta = $("modal").querySelector("textarea") as HTMLTextAreaElement;
     ta.value = "e-Taxの利用者識別番号を取る";
@@ -1362,7 +1362,7 @@ describe("達成済みの括りへ中身を足す", () => {
     );
     findButton("root-list", "分解する機能")!.click();
     await tick();
-    findButton("inspector", "前提を一括追加")!.click();
+    findButton("inspector", "分解する")!.click();
     await tick();
     findButton("modal", "中身")!.click();
     await tick();
@@ -1495,7 +1495,7 @@ describe("自動解決", () => {
 
 describe("新しい目的", () => {
   test("目的が0件でも、そこから1個目を作れる", async () => {
-    // 空の vault では選択できるノードが無く、インスペクタの「前提を一括追加」に
+    // 空の vault では選択できるノードが無く、インスペクタの「分解する」に
     // 辿り着けない。最初の1個を作る道がそこしか無いと、新しいフォルダを選んだ
     // 人が詰む（2026-08-31 に懸念として記録、2026-09-01 にコードで確認）。
     document.body.innerHTML = HTML;
@@ -1609,7 +1609,7 @@ describe("画面に id を出さない", () => {
     findButton("root-list", "確定申告")!.click();
     await tick();
     expect(ULID_RE.test(text("inspector"))).toBe(false);
-    findButton("inspector", "前提を一括追加")!.click();
+    findButton("inspector", "分解する")!.click();
     await tick();
     expect(ULID_RE.test(text("modal"))).toBe(false);
   });
@@ -1642,7 +1642,7 @@ describe("画面に id を出さない", () => {
   test("一括追加の見出しはノード名で出る", async () => {
     findButton("root-list", "確定申告")!.click();
     await tick();
-    findButton("inspector", "前提を一括追加")!.click();
+    findButton("inspector", "分解する")!.click();
     await tick();
     expect(text("modal")).toContain("「確定申告」には何が必要？");
     expect(ULID_RE.test(text("modal"))).toBe(false);
@@ -2090,7 +2090,7 @@ describe("右クリックのメニュー", () => {
     // 既定を止めていないと、WebView2 の「再読み込み」等が重なって出る
     expect(ev.defaultPrevented).toBe(true);
     expect(menuLabels().join(" ")).toContain("達成にする");
-    expect(menuLabels().join(" ")).toContain("前提を一括追加");
+    expect(menuLabels().join(" ")).toContain("分解する");
     // 右クリックでも選ぶ。閉じたあとに右のパネルが別のものを指していると、
     // どれを触ったのか分からなくなる。
     expect(text("inspector")).toContain("MVP実装完了");

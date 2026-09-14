@@ -792,7 +792,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         icon: done ? "circleSlash" : "circleCheck",
         onSelect: () => void toggle(target.id),
       });
-      items.push({ label: "前提を一括追加", icon: "plus", onSelect: () => openBulkAdd(target.id) });
+      items.push({ label: "分解する", icon: "plus", onSelect: () => openBulkAdd(target.id) });
       const on = isGoal(state.graph, target.id, state.rev);
       items.push({
         label: on ? "地図から外す" : "地図に出す",
@@ -1062,7 +1062,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   /** 新しい目的を1つ起こす。
    *
    * 空の vault ではノードが1つも無く、選択も無いので、インスペクタ側の
-   * 「前提を一括追加」には辿り着けない——**最初の1個を作る道がそこしか無いと
+   * 「分解する」には辿り着けない——**最初の1個を作る道がそこしか無いと
    * 詰む**（2026-08-31 に懸念として記録し、2026-09-01 にコードで確認した）。
    * サイドバーの見出しに常設し、0件のときは空表示からも同じ操作を出す。
    *
@@ -1083,7 +1083,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    *
    * `+` の位置は動かさない。**空の vault では最初の1個を作る道がそこにしか
    * 無い**ので、発見しやすさを落とせない（2026-09-01 にコードで確認済み）。
-   * インスペクタの「前提を一括追加」は別に残す。あれは「今見ているノードの
+   * インスペクタの「分解する」は別に残す。あれは「今見ているノードの
    * 下に」という行き先が場所そのもので、分解の主役ボタンでもある。
    */
   const openAdd = (mode: "one" | "bulk" = "one"): void => {
@@ -1107,7 +1107,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   const appendOneForm = (): void => {
     modal.append(
       h("p", { class: "hint" }, [
-        "達成したいことを1つ書く。作るとグラフが開くので、分解（何が必要か）は右の「前提を一括追加」から足せる。Enter で作成。",
+        "達成したいことを1つ書く。作るとグラフが開くので、何が必要かは右の「分解する」から足せる。Enter で作成。",
       ]),
     );
     const input = h("input", { type: "text", placeholder: "引っ越す" }) as HTMLInputElement;
@@ -1154,7 +1154,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   /**
    * DSL でまとめて構造を作る。
    *
-   * 「前提を一括追加」が1つのノードの下に `requires` をフラットに生やすのに対し、
+   * 「分解する」の前提タブが1つのノードの下に `requires` をフラットに生やすのに対し、
    * こちらは**入れ子と合流を含む形をそのまま書き下す**ための入口。パーサ
    * （`parseDsl`）もストア側（`importDsl`）も先にあったのに画面から呼ぶ道が無く、
    * `AGENTS.md` はエージェントへ「アプリの一括生成に貼る」と案内していた——

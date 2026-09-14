@@ -124,7 +124,7 @@ export function renderInspector(
   actions.append(toggle);
 
   const bulk = h("button", { class: "btn", type: "button" });
-  bulk.append(iconSpan("plus", 14), "前提を一括追加");
+  bulk.append(iconSpan("plus", 14), "分解する");
   bulk.addEventListener("click", () => cb.onBulkAdd(selectedId));
   actions.append(bulk);
   container.append(actions);
@@ -136,7 +136,7 @@ export function renderInspector(
     warn.append(t);
     warn.append(
       h("p", {}, [
-        "このノードを2つに割ると輪がほどけることがあります（例:「案件を取る」→「小さい案件」「大きい案件」）。「前提を一括追加」で分解できます。",
+        "このノードを2つに割ると輪がほどけることがあります（例:「案件を取る」→「小さい案件」「大きい案件」）。割った先は「分解する」から足せます。",
       ]),
     );
     container.append(warn);
