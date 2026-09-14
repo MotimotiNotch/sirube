@@ -220,6 +220,59 @@ export function recentlyChanged(
   };
 }
 
+/** 「最近の変更」の列。見出しを押すと並べ替わる（2026-09-14、のっち依頼）。 */
+export type RecentSortKey = "mtime" | "state" | "goal" | "number";
+export interface RecentSort {
+  key: RecentSortKey;
+  dir: "asc" | "desc";
+}
+
+/** 状態の昇順。**今やれるものを先頭に**——再開したときに拾うのはそこなので。 */
+const STATE_ORDER: Record<NodeState, number> = { ACTIONABLE: 0, BLOCKED: 1, CYCLIC: 2, SATISFIED: 3 };
+
+/**
+ * 「最近の変更」の行を並べ替える。**`recentlyChanged` で切った後の行にだけかける**
+ * ——番号順で全ノードから30件を取り直すと、もう「最近」の一覧ではなくなる。
+ *
+ * 目的は行に出しているパンくずと同じ文字列（名前順に並べて ` / ` で繋ぐ）で比べる。
+ * 目的そのもののノード（パンくずが空）と番号の無いノードは、向きに関わらず末尾に
+ * 置く——比べる値が無いものが昇順の先頭に固まると、並べ替えた意味が隠れる。
+ * 同じ値どうしは新しい順のまま（押す前の並びを崩さない）。
+ *
+ * 「今やれること」には使わない。あちらの並びは構造から出る優先度そのもので、
+ * 手で並べ替えられるとこのツールの売りが消える。
+ */
+export function sortRecentHits(g: Graph, hits: readonly SearchHit[], sort: RecentSort): SearchHit[] {
+  const mtime = (h: SearchHit): number => g.nodes[h.id]?.mtimeMs ?? 0;
+  const goal = (h: SearchHit): string =>
+    h.breadcrumb
+      .map((id) => g.nodes[id]?.name ?? id)
+      .sort((a, b) => a.localeCompare(b, "ja"))
+      .join(" / ");
+  const sign = sort.dir === "asc" ? 1 : -1;
+  const byKey = (a: SearchHit, b: SearchHit): number => {
+    switch (sort.key) {
+      case "mtime":
+        return sign * (mtime(a) - mtime(b));
+      case "state":
+        return sign * (STATE_ORDER[a.state] - STATE_ORDER[b.state]);
+      case "goal": {
+        const ga = goal(a);
+        const gb = goal(b);
+        if (ga === "" || gb === "") return (ga === "" ? 1 : 0) - (gb === "" ? 1 : 0);
+        return sign * ga.localeCompare(gb, "ja");
+      }
+      case "number": {
+        if (a.number === undefined || b.number === undefined) {
+          return (a.number === undefined ? 1 : 0) - (b.number === undefined ? 1 : 0);
+        }
+        return sign * (a.number - b.number);
+      }
+    }
+  };
+  return [...hits].sort((a, b) => byKey(a, b) || mtime(b) - mtime(a) || a.id.localeCompare(b.id));
+}
+
 /** 横断 Next Action ビュー。検索の特殊形（空クエリ + ACTIONABLE）。 */
 export function nextActions(
   g: Graph,

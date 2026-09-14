@@ -15,19 +15,57 @@
 //   3. 説明文は初回しか読まれない。畳んで、必要な人だけ開く。
 
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
-import type { SearchResult } from "../core/search.ts";
+import type { RecentSort, RecentSortKey, SearchResult } from "../core/search.ts";
 import { formatDate, formatDateTime, h, iconSpan, stateBadge } from "./dom.ts";
 
 export interface ListCallbacks {
   onSelect(id: string): void;
   onDecompose(cycleNodes: string[]): void;
+  /** 「最近の変更」の列の見出しを押した。向きの決め方は呼び出し側が持つ。 */
+  onSort?(key: RecentSortKey): void;
+}
+
+/** 「最近の変更」の列。見出しと行を同じ5列の grid に載せる（`.recent`）。
+ *  名前は並べ替えない——名前順に並んでも再開の手がかりにならない。 */
+const RECENT_COLUMNS: { label: string; key?: RecentSortKey }[] = [
+  { label: "番号", key: "number" },
+  { label: "名前" },
+  { label: "目的", key: "goal" },
+  { label: "状態", key: "state" },
+  { label: "更新日", key: "mtime" },
+];
+
+function recentHeader(sort: RecentSort, cb: ListCallbacks): HTMLElement {
+  const row = h("div", { class: "list-cols recent" });
+  for (const col of RECENT_COLUMNS) {
+    if (!col.key) {
+      row.append(h("span", { class: "list-col" }, [col.label]));
+      continue;
+    }
+    const key = col.key;
+    const active = sort.key === key;
+    const btn = h("button", {
+      class: active ? "list-col sortable active" : "list-col sortable",
+      type: "button",
+      "data-sort": key,
+      "aria-pressed": String(active),
+      title: `${col.label}で並べ替え`,
+    });
+    btn.append(h("span", {}, [col.label]));
+    // 向きの印は並べている列にだけ出す。全列に薄く出すと、どれで並んでいるかが
+    // 印の濃さの差でしか読めなくなる。
+    if (active) btn.append(iconSpan(sort.dir === "asc" ? "chevronUp" : "chevronDown", 12));
+    btn.addEventListener("click", () => cb.onSort?.(key));
+    row.append(btn);
+  }
+  return row;
 }
 
 export function renderList(
   container: HTMLElement,
   graph: Graph,
   result: SearchResult,
-  opts: { title: string; query: string; scoped?: boolean; recent?: boolean },
+  opts: { title: string; query: string; scoped?: boolean; recent?: boolean; recentSort?: RecentSort },
   cb: ListCallbacks,
 ): void {
   container.replaceChildren();
@@ -65,11 +103,16 @@ export function renderList(
   // 状態は「混ざっているときだけ」出す。揃っているなら見出しが既に言っている。
   const mixedState = new Set(result.hits.map((x) => x.state)).size > 1;
 
+  // 「最近の変更」は並べ替えられる表として出す（2026-09-14、のっち依頼）。見出しが
+  // 無いと、行の右に並ぶ値がそれぞれ何かを読み手が推し量ることになる。
+  // 「今やれること」には付けない——並びは構造から出る優先度で、手で崩させない。
+  if (recent && opts.recentSort) container.append(recentHeader(opts.recentSort, cb));
+
   for (const hit of result.hits) {
     const node = graph.nodes[hit.id];
     if (!node) continue;
 
-    const card = h("div", { class: "hit" });
+    const card = h("div", { class: recent ? "hit recent" : "hit" });
 
     // 付箋は行の左の縁に。**俯瞰では出さない**——全行が同じ目的の下にいるので
     // 全行で同じ色になる（規則2）。パンくずを消しているのと同じ理由。
@@ -89,8 +132,10 @@ export function renderList(
     const main = h("button", { class: "hit-main", type: "button" });
     // 番号は名前の前。行頭で揃うと「一覧の中の場所」ではなく「その札」として
     // 読める（右端に置くと、パンくずや期限と並んで属性の1つに見える）。
+    // 表の形（最近の変更）では番号が無くても枠を置く。grid の列がずれる。
     if (hit.number !== undefined) main.append(h("span", { class: "hit-number" }, [`#${hit.number}`]));
-    main.append(h("span", { class: "hit-name" }, [node.name]));
+    else if (recent) main.append(h("span", { class: "hit-number" }));
+    const name = h("span", { class: "hit-name" }, [node.name]);
 
     // パンくずは名前と同じ行の右側へ。二段組をやめると行数が半分以下になる。
     // 空でも要素は置く——右寄せの基準をこの1つに集約しておかないと、
@@ -109,20 +154,29 @@ export function renderList(
           .join(" / ");
     const crumb = h("span", { class: "hit-crumb" }, [crumbText]);
     if (crumbText) crumb.title = `${crumbText} の下`;
-    main.append(crumb);
 
     const meta = h("div", { class: "hit-meta" });
     if (hit.inDegree > 1) {
       meta.append(h("span", { class: "hit-indegree", title: `${hit.inDegree} 箇所から要求されている（片付けると複数が進む）` }, [`合流 ${hit.inDegree}`]));
     }
     if (hit.due) meta.append(h("span", { class: "hit-indegree", title: "期限" }, [hit.due]));
-    if (mixedState) meta.append(stateBadge(hit.state));
-    // 「最近の変更」では、並んでいる理由（いつ書き換わったか）を行に出す。
-    // 日付だけ出して時刻はツールチップ（詳細パネルと同じ出し方）。
-    if (recent && node.mtimeMs > 0) {
-      meta.append(h("span", { class: "hit-date", title: `更新 ${formatDateTime(node.mtimeMs)}` }, [formatDate(node.mtimeMs)]));
+
+    if (recent) {
+      // 表の形。合流・期限は列を持たない（見出しで並べ替える軸ではない）ので、
+      // 名前の後ろに寄せて名前の列の中に収める。状態は列なので揃っていても出す
+      // ——空欄の列は「無い」ではなく「読み込めていない」に見える。
+      const nameCell = h("span", { class: "hit-namecell" }, [name]);
+      if (meta.childElementCount > 0) nameCell.append(meta);
+      main.append(nameCell, crumb, h("span", { class: "hit-state" }, [stateBadge(hit.state)]));
+      // 日付だけ出して時刻はツールチップ（詳細パネルと同じ出し方）。
+      const date = h("span", { class: "hit-date" }, node.mtimeMs > 0 ? [formatDate(node.mtimeMs)] : []);
+      if (node.mtimeMs > 0) date.title = `更新 ${formatDateTime(node.mtimeMs)}`;
+      main.append(date);
+    } else {
+      main.append(name, crumb);
+      if (mixedState) meta.append(stateBadge(hit.state));
+      main.append(meta);
     }
-    main.append(meta);
     main.addEventListener("click", () => cb.onSelect(hit.id));
     card.append(main);
 

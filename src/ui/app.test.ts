@@ -1415,10 +1415,49 @@ describe("最近の変更", () => {
     expect(rowNames()[0]).toBe("いま作った目的");
   });
 
-  test("「今やれること」には日付を出さない", async () => {
+  test("「今やれること」には日付も列の見出しも出さない", async () => {
     $("nav-actionable").click();
     await tick();
     expect($("center-body").querySelector(".hit-date")).toBeNull();
+    expect($("center-body").querySelector(".list-cols")).toBeNull();
+  });
+
+  describe("列の見出しで並べ替える", () => {
+    const sortBtn = (key: string) => $("center-body").querySelector(`.list-cols [data-sort="${key}"]`) as HTMLButtonElement;
+    const rowStates = (): string[] =>
+      Array.from($("center-body").querySelectorAll(".hit .hit-state .state-badge")).map(
+        (e) => Array.from(e.classList).find((c) => c.startsWith("state-") && c !== "state-badge")!,
+      );
+    const ORDER = ["state-ACTIONABLE", "state-BLOCKED", "state-CYCLIC", "state-SATISFIED"];
+    const ranks = () => rowStates().map((s) => ORDER.indexOf(s));
+    const sorted = (xs: number[], dir: 1 | -1) => xs.every((x, i) => i === 0 || dir * (x - xs[i - 1]!) >= 0);
+
+    test("見出しが出て、既定は更新日の新しい順", async () => {
+      $("nav-recent").click();
+      await tick();
+      const labels = Array.from($("center-body").querySelectorAll(".list-cols .list-col")).map((e) => e.textContent);
+      expect(labels).toEqual(["番号", "名前", "目的", "状態", "更新日"]);
+      expect(sortBtn("mtime").getAttribute("aria-pressed")).toBe("true");
+      // 状態は列なので、揃っていても全行に出る
+      expect(rowStates().length).toBe($("center-body").querySelectorAll(".hit").length);
+    });
+
+    test("状態を押すと今やれるものが先頭、もう一度押すと逆向き", async () => {
+      $("nav-recent").click();
+      await tick();
+      // 陽性対照: 既定の並び（更新日）では状態の順になっていない
+      expect(sorted(ranks(), 1)).toBe(false);
+
+      sortBtn("state").click();
+      await tick();
+      expect(sortBtn("state").getAttribute("aria-pressed")).toBe("true");
+      expect(sortBtn("mtime").getAttribute("aria-pressed")).toBe("false");
+      expect(sorted(ranks(), 1)).toBe(true);
+
+      sortBtn("state").click();
+      await tick();
+      expect(sorted(ranks(), -1)).toBe(true);
+    });
   });
 
   test("検索を打つと検索に切り替わり、消すと「今やれること」に戻る", async () => {

@@ -23,7 +23,16 @@ import {
   toggleSatisfied,
 } from "./engine.ts";
 import { newGraph, type Graph } from "./model.ts";
-import { countActionable, nextActions, pathFromRoot, recentlyChanged, search, stuckReport } from "./search.ts";
+import {
+  countActionable,
+  nextActions,
+  pathFromRoot,
+  recentlyChanged,
+  search,
+  sortRecentHits,
+  stuckReport,
+  type RecentSort,
+} from "./search.ts";
 
 /** DSL からテスト用グラフを組む。mtime は 0。 */
 function g(dsl: string): Graph {
@@ -507,6 +516,54 @@ describe("最近の変更", () => {
     const result = recentlyChanged(graph, buildReverseIndex(graph));
     expect(result.hits.map((h) => h.id)).toEqual(["C"]);
     expect(result.cycles).toEqual([]);
+  });
+
+  describe("列で並べ替える", () => {
+    // 目的2つ。状態・番号・目的がばらけるように組む。
+    //   ひっこし(BLOCKED, #3) -> 家(BLOCKED, #1) -> 不動産(ACTIONABLE, #5)
+    //   かいもの(ACTIONABLE, #2) -> 領収書(SATISFIED, 番号なし)
+    const setup = () => {
+      const graph = g("ひっこし -> 家 -> 不動産, かいもの -> 領収書");
+      graph.nodes["領収書"]!.satisfied = true;
+      const t: Record<string, [number, number | undefined]> = {
+        不動産: [1_000, 5],
+        家: [2_000, 1],
+        領収書: [3_000, undefined],
+        かいもの: [4_000, 2],
+        ひっこし: [5_000, 3],
+      };
+      for (const [id, [mtime, num]] of Object.entries(t)) {
+        graph.nodes[id]!.mtimeMs = mtime;
+        if (num !== undefined) graph.nodes[id]!.number = num;
+      }
+      const hits = recentlyChanged(graph, buildReverseIndex(graph)).hits;
+      const ids = (sort: RecentSort) => sortRecentHits(graph, hits, sort).map((h) => h.id);
+      return { hits, ids };
+    };
+
+    test("更新日は既定と同じ新しい順、昇順で古い順", () => {
+      const { hits, ids } = setup();
+      expect(ids({ key: "mtime", dir: "desc" })).toEqual(hits.map((h) => h.id));
+      expect(ids({ key: "mtime", dir: "asc" })).toEqual(["不動産", "家", "領収書", "かいもの", "ひっこし"]);
+    });
+
+    test("状態の昇順は今やれるものが先頭、同じ状態の中は新しい順", () => {
+      const { ids } = setup();
+      expect(ids({ key: "state", dir: "asc" })).toEqual(["かいもの", "不動産", "ひっこし", "家", "領収書"]);
+      expect(ids({ key: "state", dir: "desc" })).toEqual(["領収書", "ひっこし", "家", "かいもの", "不動産"]);
+    });
+
+    test("番号の無いノードは向きに関わらず末尾", () => {
+      const { ids } = setup();
+      expect(ids({ key: "number", dir: "asc" })).toEqual(["家", "かいもの", "ひっこし", "不動産", "領収書"]);
+      expect(ids({ key: "number", dir: "desc" })).toEqual(["不動産", "ひっこし", "かいもの", "家", "領収書"]);
+    });
+
+    test("目的はパンくずの名前で比べ、目的そのもの（パンくずが空）は向きに関わらず末尾", () => {
+      const { ids } = setup();
+      expect(ids({ key: "goal", dir: "asc" })).toEqual(["領収書", "家", "不動産", "ひっこし", "かいもの"]);
+      expect(ids({ key: "goal", dir: "desc" })).toEqual(["家", "不動産", "領収書", "ひっこし", "かいもの"]);
+    });
   });
 });
 

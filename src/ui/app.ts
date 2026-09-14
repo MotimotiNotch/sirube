@@ -8,7 +8,15 @@ import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
 import { enclosingGoal, goalLayer, isGoal, mapSeeds, type GoalLayer } from "../core/goals.ts";
 import { parseDsl } from "../core/dsl.ts";
 import { normalizeForDuplicateCheck, planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
-import { countActionable, nextActions, pathFromRoot, recentlyChanged, search } from "../core/search.ts";
+import {
+  countActionable,
+  nextActions,
+  pathFromRoot,
+  recentlyChanged,
+  search,
+  sortRecentHits,
+  type RecentSort,
+} from "../core/search.ts";
 import type { SirubeFs } from "../store/fs.ts";
 import { MarkdownGraphStore } from "../store/store.ts";
 import { clear, el, h, iconSpan, stateDot, toast } from "./dom.ts";
@@ -59,6 +67,10 @@ interface AppState {
   /** 一覧を「最近の変更」で出すか（2026-09-14）。検索語があれば検索が勝ち、
    *  俯瞰（`scopeId`）とは同時に立たない。「今やれること」と同じ1画面の別の顔。 */
   recent: boolean;
+  /** 「最近の変更」をどの列で並べているか。**保存しない**——開き直したら新しい順に
+   *  戻る。前回の続きとして復元するのは「どこを見ていたか」で、道具立てではない
+   *  （検索語を保存しないのと同じ理由）。 */
+  recentSort: RecentSort;
   /** 右パネルの開閉。**ノードごとに持たない**——選び直すたびに畳み直すと、
    *  続けて同じ操作をするときに毎回開くことになる。メモの編集モードだけは
    *  選び直しで閉じる（別のノードを開いたのに書く顔のままだと、どれを書いて
@@ -259,6 +271,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     goals: goalLayer(graph, buildReverseIndex(graph)),
     query: "",
     recent: false,
+    recentSort: { key: "mtime", dir: "desc" },
     trail: [],
     issues,
     plan: planReconcile(graph),
@@ -1793,12 +1806,13 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     const scopeId = state.query === "" ? state.scopeId : undefined;
     const scope = scopeId ? state.graph.nodes[scopeId] : undefined;
     const recent = state.query === "" && !scopeId && state.recent;
-    const result =
-      state.query !== ""
-        ? search(state.graph, state.rev, { query: state.query, cycles: state.cycles })
-        : recent
-          ? recentlyChanged(state.graph, state.rev, { cycles: state.cycles, limit: RECENT_LIMIT })
-          : nextActions(state.graph, state.rev, { cycles: state.cycles, ...(scopeId ? { under: scopeId } : {}) });
+    const result = (() => {
+      if (state.query !== "") return search(state.graph, state.rev, { query: state.query, cycles: state.cycles });
+      if (!recent) return nextActions(state.graph, state.rev, { cycles: state.cycles, ...(scopeId ? { under: scopeId } : {}) });
+      // 30件に切ってから並べ替える。先に並べ替えると「最近」の一覧ではなくなる。
+      const r = recentlyChanged(state.graph, state.rev, { cycles: state.cycles, limit: RECENT_LIMIT });
+      return { ...r, hits: sortRecentHits(state.graph, r.hits, state.recentSort) };
+    })();
     renderList(
       body,
       state.graph,
@@ -1807,9 +1821,19 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         title: state.query !== "" ? "検索結果" : recent ? "最近の変更" : "今やれること",
         query: state.query,
         ...(scope ? { scoped: true } : {}),
-        ...(recent ? { recent: true } : {}),
+        ...(recent ? { recent: true, recentSort: state.recentSort } : {}),
       },
       {
+        // 同じ列をもう一度押したら向きを返す。別の列に移ったら、その列の読みやすい
+        // 向きから始める——更新日は新しい順、それ以外は昇順（状態なら今やれるものが先頭）。
+        onSort: (key) => {
+          const cur = state.recentSort;
+          state.recentSort =
+            cur.key === key
+              ? { key, dir: cur.dir === "asc" ? "desc" : "asc" }
+              : { key, dir: key === "mtime" ? "desc" : "asc" };
+          render();
+        },
         onSelect: (id) => {
           select(id);
           // 俯瞰から選んだときは、絞っていた目的を経路に残す。ここで経路ごと

@@ -473,6 +473,59 @@ body.no-inspector #inspector-resizer {
   font-variant-numeric: tabular-nums;
 }
 
+/* 「最近の変更」は見出し付きの表（2026-09-14）。見出しと行を同じ列幅の grid に
+ * 載せる——行ごとの flex だと中身の長さで列が行ごとにずれ、見出しと揃わない。
+ * 列幅は1箇所で持つ。
+ *
+ * 名前と目的は比で分ける。目的に固定の上限（14em）を持たせると、grid は fr より
+ * 先に固定幅を取るので、狭い窓では名前の列が0まで潰れて名前が消えた（2026-09-14 実機）。
+ * 固定の列は px で持つ。em だと見出し（11px）と行（14px）で同じ変数が違う幅になり、
+ * 右へ行くほど見出しがずれた。 */
+.recent { --recent-cols: 46px minmax(84px, 2fr) minmax(0, 1fr) 108px 88px; }
+.hit.recent .hit-main {
+  display: grid;
+  grid-template-columns: var(--recent-cols);
+  column-gap: 10px;
+}
+.hit-namecell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.hit.recent .hit-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hit.recent .hit-meta { margin-left: 0; }
+.hit.recent .hit-crumb { margin-left: 0; padding-left: 0; }
+.hit-state { display: flex; }
+
+/* 見出しは行の枠（border 1px + padding 12px）と同じだけ内側に寄せる。
+ * 行より静かに——読むのは最初の1回で、以降は並べ替えの取っ手でしかない。 */
+.list-cols {
+  display: grid;
+  grid-template-columns: var(--recent-cols);
+  column-gap: 10px;
+  padding: 0 13px 4px;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.list-col { display: inline-flex; align-items: center; gap: 2px; justify-self: start; white-space: nowrap; }
+.list-col.sortable {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.list-col.sortable:hover { color: var(--fg-muted); }
+.list-col.active { color: var(--fg); }
+
 /* 隣接は「文脈として出ているもの」なので、ヒット本体とはっきり分ける。
  * 混ざるとどれが検索結果なのか読めなくなる。 */
 .neighbors {
