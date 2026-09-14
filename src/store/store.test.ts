@@ -147,6 +147,39 @@ describe("ストア", () => {
     expect(graph.nodes["引っ越し"]!.requires.sort()).toEqual(res.created.sort());
   });
 
+  test("一括追加は今回足した requires だけを返す", async () => {
+    const fs = new MemoryFs({
+      引っ越し: md("satisfied: false\nrequires:\n  - 家\ncontains: []"),
+      家: md("satisfied: false\nrequires: []\ncontains: []"),
+      不動産: md("satisfied: false\nrequires: []\ncontains: []"),
+    });
+    const store = new MarkdownGraphStore(fs);
+    const { graph } = await store.load();
+    // 「家」は既に繋がっているので数えない。「不動産」は既存ノードへの新しい線
+    const res = await store.addBulkRequires(graph, "引っ越し", "家\n不動産");
+    expect(res.addedRequires).toEqual([{ from: "引っ越し", to: "不動産" }]);
+  });
+
+  test("近道を外すときは書く直前に確かめ直し、唯一の繋がりは切らない", async () => {
+    const fs = new MemoryFs({
+      引っ越し: md("satisfied: false\nrequires:\n  - 家\n  - 不動産\ncontains: []"),
+      家: md("satisfied: false\nrequires:\n  - 不動産\ncontains: []"),
+      不動産: md("satisfied: false\nrequires: []\ncontains: []"),
+    });
+    const store = new MarkdownGraphStore(fs);
+    const { graph } = await store.load();
+    const shortcut = { from: "引っ越し", to: "不動産", via: "家" };
+
+    // 確認を出している間に外で「家 -> 不動産」が消えた
+    graph.nodes["家"]!.requires = [];
+    expect(await store.detachShortcuts(graph, [shortcut])).toEqual([]);
+    expect(graph.nodes["引っ越し"]!.requires).toContain("不動産");
+
+    graph.nodes["家"]!.requires = ["不動産"];
+    expect(await store.detachShortcuts(graph, [shortcut])).toEqual([shortcut]);
+    expect(parseNodeFile("引っ越し", await fs.readNode("引っ越し"), 0).node.requires).toEqual(["家"]);
+  });
+
   test("ノード削除は参照側からもエッジを外す", async () => {
     const fs = new MemoryFs({
       A: md("satisfied: false\nrequires:\n  - B\ncontains: []"),

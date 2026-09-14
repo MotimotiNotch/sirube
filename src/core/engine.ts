@@ -537,6 +537,110 @@ export function inDegree(id: string, rev: ReverseIndex): number {
   return (rev.requiredBy.get(id)?.length ?? 0) + (rev.containedBy.get(id)?.length ?? 0);
 }
 
+// ---------------------------------------------------------------------------
+// 近道（要らなくなった直接の前提）
+// ---------------------------------------------------------------------------
+
+/** `from -> to` の直接の前提が、`via` を通る別の道でも届いている。 */
+export interface Shortcut {
+  from: string;
+  to: string;
+  via: string;
+}
+
+/**
+ * 繋いだことで**要らなくなった直接の `requires`** を探す。
+ *
+ * 「前提を一括追加」は親の直下にフラットに並べるので、書いた時点では
+ * 「前提の前提」も兄弟として並ぶ（`引っ越し -> 引っ越し先の家`、
+ * `引っ越し -> 不動産に行く`）。後で `引っ越し先の家 -> 不動産に行く` と繋いでも
+ * `引っ越し -> 不動産に行く` が残り、**入次数が水増しされて偽の合流点になる**
+ * （優先度は入次数から出るので、嘘の優先度が付く）。のっち 2026-09-14
+ * 「一括登録で前提を追加すると同じレイヤーに追加されて混乱しそう」。
+ *
+ * 入力を階層付きにはしない——書き出す瞬間に構造を決めさせると分解の速度が落ちる。
+ * 平らに書かせて、**繋いだ瞬間に近道を信号として見せる**（輪と同じ扱い）。
+ *
+ * 外しても状態は変わらない。`from` が今やれるには `via` の達成が要り、`via` の
+ * 達成には（遡及があるので）`to` の達成が伴う。カスケードも `via` を経由して
+ * 同じ所へ届く。
+ *
+ * 見るのは `requires` だけ。`contains` は完了の伝わる向きが逆（下から集約のみ）
+ * なので、混ざった道では「外してもカスケードが同じ所へ届く」が成り立たない。
+ * 輪の上のノードも見ない——輪の中ではどこからでも届くので、全部が近道に見える。
+ * 輪は輪で「割る」信号が別に出ている。
+ *
+ * `added` は今回足した `requires`。**今回の追加で近道になったものだけ**を返し、
+ * 前からあった近道は掘り返さない（聞いてもいない所を指摘し始めると、繋ぐたびに
+ * 無関係な確認が出る）。
+ */
+export function findShortcuts(g: Graph, added: readonly { from: string; to: string }[]): Shortcut[] {
+  const cyclic = cyclicNodes(g);
+  const rev = buildReverseIndex(g);
+  const out: Shortcut[] = [];
+  const seen = new Set<string>();
+
+  for (const { from: u, to: v } of added) {
+    if (!g.nodes[u] || !g.nodes[v] || cyclic.has(u) || cyclic.has(v)) continue;
+    if (!g.nodes[u]!.requires.includes(v)) continue; // 外で消えていた
+    // 今回の線を通る道は「u の祖先（u を含む）」から「v の子孫（v を含む）」へ
+    // 伸びる。その間に直接の線があれば近道。u -> v 自体も、別の子から v へ
+    // 届いていれば近道（既にある道の上へ近道を足した場合）。
+    const upper = walkRequires(u, (id) => rev.requiredBy.get(id) ?? [], cyclic);
+    const lower = walkRequires(v, (id) => g.nodes[id]?.requires ?? [], cyclic);
+    for (const a of upper) {
+      for (const b of g.nodes[a]?.requires ?? []) {
+        if (!lower.has(b)) continue;
+        const key = JSON.stringify([a, b]);
+        if (seen.has(key)) continue;
+        const via = shortcutVia(g, a, b, cyclic);
+        if (via === undefined) continue;
+        seen.add(key);
+        out.push({ from: a, to: b, via });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * `from -> to` が近道なら、別の道の最初の一歩（`from` の子）を返す。
+ * 近道でなければ `undefined`。**書く直前の確かめ直しにも使う**——確認を
+ * 出している間に外でファイルが変わると、もう近道ではないことがある。
+ */
+export function shortcutVia(
+  g: Graph,
+  from: string,
+  to: string,
+  cyclic: ReadonlySet<string> = cyclicNodes(g),
+): string | undefined {
+  const node = g.nodes[from];
+  if (!node || !node.requires.includes(to) || cyclic.has(from) || cyclic.has(to)) return undefined;
+  for (const c of node.requires) {
+    if (c === to || cyclic.has(c) || !g.nodes[c]) continue;
+    if (walkRequires(c, (id) => g.nodes[id]?.requires ?? [], cyclic).has(to)) return c;
+  }
+  return undefined;
+}
+
+/** `start` から `next` で辿れる所（自分を含む）。輪の上には入らない。 */
+function walkRequires(
+  start: string,
+  next: (id: string) => readonly string[],
+  cyclic: ReadonlySet<string>,
+): Set<string> {
+  const seen = new Set<string>([start]);
+  const stack = [start];
+  while (stack.length > 0) {
+    for (const n of next(stack.pop()!)) {
+      if (seen.has(n) || cyclic.has(n)) continue;
+      seen.add(n);
+      stack.push(n);
+    }
+  }
+  return seen;
+}
+
 /** `contains` と `requires` の両方を下向きに辿って集めた子孫（自分を含む）。 */
 export function collectMembers(g: Graph, nodeId: string, seen: Set<string> = new Set()): string[] {
   if (seen.has(nodeId)) return [];

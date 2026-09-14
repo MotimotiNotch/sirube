@@ -1211,6 +1211,53 @@ describe("まとめて追加（DSL）", () => {
     expect($("center-body").querySelectorAll(".hit").length).toBe(1);
   });
 
+  test("兄弟の下へ兄弟を繋ぐと、親からの直接の線を外すか聞いてくる", async () => {
+    // 一括追加は平らに並べるので「前提の前提」も兄弟になる。後から繋いだとき、
+    // 親からの直接の線が残ると偽の合流点になる（のっち 2026-09-14）。
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    findButton("inspector", "前提を一括追加")!.click();
+    await tick();
+    const bulk = $("modal").querySelector("textarea") as HTMLTextAreaElement;
+    type(bulk, "医療費の領収書を集める");
+    findButton("modal", "追加")!.click();
+    await tick();
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(true); // ここではまだ近道は無い
+
+    const ta = await openImport();
+    type(ta, "領収書整理 -> 医療費の領収書を集める");
+    findButton("modal", "追加")!.click();
+    await tick();
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(false);
+    expect(text("modal")).toContain("確定申告 → 医療費の領収書を集める（領収書整理 から届く）");
+    // 入力の無い確認なので、Enter の勢いで書かないよう「そのまま」にフォーカス
+    expect(document.activeElement?.textContent).toBe("そのまま");
+
+    findButton("modal", "外す")!.click();
+    await tick();
+    expect($("modal-backdrop").classList.contains("hidden")).toBe(true);
+    const input = $("search-input") as HTMLInputElement;
+    input.value = "医療費の領収書";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    // 親は「領収書整理」の1つだけになり、合流点ではなくなる
+    expect(text("center-body")).not.toContain("合流 2");
+  });
+
+  test("「そのまま」なら何も外さない", async () => {
+    const ta = await openImport();
+    type(ta, "確定申告 -> 医療費の領収書を集める, 領収書整理 -> 医療費の領収書を集める");
+    findButton("modal", "追加")!.click();
+    await tick();
+    findButton("modal", "そのまま")!.click();
+    await tick();
+    const input = $("search-input") as HTMLInputElement;
+    input.value = "医療費の領収書";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    expect(text("center-body")).toContain("合流 2");
+  });
+
   test("構文エラーは押す前に出す", async () => {
     const ta = await openImport();
     type(ta, "引っ越し ->");

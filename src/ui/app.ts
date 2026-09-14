@@ -3,7 +3,7 @@
 // サーバは無い。ストアもエンジンもここ（フロント）で動き、ファイルアクセスだけ
 // `SirubeFs` の実装を差し替える（開発中はメモリ、Tauri ではプラグイン fs）。
 
-import { analyzeCycles, buildReverseIndex, canUndo, hasChildren, inDegree, progress, resolveState, roots, type CycleInfo, type ReverseIndex, type TogglePlan, type ToggleUndo } from "../core/engine.ts";
+import { analyzeCycles, buildReverseIndex, canUndo, findShortcuts, hasChildren, inDegree, progress, resolveState, roots, type CycleInfo, type ReverseIndex, type TogglePlan, type ToggleUndo } from "../core/engine.ts";
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
 import { enclosingGoal, goalLayer, isGoal, mapSeeds, type GoalLayer } from "../core/goals.ts";
 import { parseDsl } from "../core/dsl.ts";
@@ -1202,6 +1202,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       const first = res.created[0] ?? res.updated[0];
       if (first) focusFresh(first);
       toast(`${res.created.length} 件を作り、${res.updated.length} 件に繋ぎました`);
+      offerShortcuts(res.addedRequires);
     });
     actions.append(cancel, ok);
     modal.append(actions);
@@ -1249,11 +1250,74 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       closeModal();
       focusFresh(targetId);
       toast(`${res.created.length} 件を追加しました`);
+      offerShortcuts(res.addedRequires);
     });
     actions.append(cancel, ok);
     modal.append(actions);
     openModal();
     ta.focus();
+  };
+
+  /**
+   * 繋いだことで要らなくなった直接の前提を見せ、外すか聞く（`findShortcuts`）。
+   *
+   * 一括追加は平らに並べるので、「前提の前提」が兄弟として混ざる。後から兄弟の
+   * 下へ兄弟を繋ぐと親からの直接の線が残り、偽の合流点になる（のっち 2026-09-14）。
+   * 入力を階層付きにする代わりに、**繋いだ瞬間にここで1手で直せる**ようにする。
+   *
+   * 全部外すか、そのままかの2択。残しても状態は壊れない（入次数が水増しされる
+   * だけ）ので、トグルの下見と違って「そのまま」は安全側の答えになる。
+   */
+  const offerShortcuts = (added: readonly { from: string; to: string }[]): void => {
+    const shortcuts = findShortcuts(state.graph, added);
+    if (shortcuts.length === 0) return;
+
+    clear(modal);
+    modal.append(h("h3", {}, ["直接の繋がりが要らなくなりました"]));
+    modal.append(
+      h("p", { class: "hint" }, [
+        "別の前提を通って同じノードに届いています。直接の線を残すと、2か所から求められている合流点に見えます。外しても達成状態は変わりません。",
+      ]),
+    );
+    const ul = h("ul", { class: "plan-list" });
+    for (const s of shortcuts) {
+      ul.append(
+        h("li", {}, [
+          h("span", { class: "plan-kind" }, ["外す"]),
+          `${nameOf(s.from)} → ${nameOf(s.to)}（${nameOf(s.via)} から届く）`,
+        ]),
+      );
+    }
+    modal.append(ul);
+
+    const actions = h("div", { class: "modal-actions" });
+    const keep = h("button", { class: "btn", type: "button" }, ["そのまま"]);
+    keep.addEventListener("click", closeModal);
+    const ok = h("button", { class: "btn primary", type: "button" }, ["外す"]);
+    ok.addEventListener("click", async () => {
+      closeModal();
+      // 1件ずつ確かめ直してから外す。出している間に外でファイルが変わり、
+      // 唯一の繋がりになっていたものは切らない（ストア側で弾く）。
+      const done = await store.detachShortcuts(state.graph, shortcuts);
+      recompute();
+      render();
+      if (done.length === 0) {
+        toast("ファイルが外で変わったので、外しませんでした");
+        return;
+      }
+      const one = done.length === 1 ? done[0]! : undefined;
+      toast(
+        one
+          ? `「${nameOf(one.from)}」から「${nameOf(one.to)}」を外しました（まとめて追加に「${nameOf(one.from)} -> ${nameOf(one.to)}」で戻せます）`
+          : `直接の線を ${done.length} 本外しました`,
+      );
+    });
+    actions.append(keep, ok);
+    modal.append(actions);
+    openModal();
+    // 入力の無いモーダルなので、確定の Enter が勢いで書き込みにならないよう
+    // 書かない側へ寄せる（トグルの下見と同じ）。
+    keep.focus();
   };
 
   /**

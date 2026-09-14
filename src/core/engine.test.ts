@@ -12,12 +12,14 @@ import {
   descendantOutline,
   descendantProgress,
   findCycles,
+  findShortcuts,
   inDegree,
   neighbors,
   planToggle,
   progress,
   resolveState,
   roots,
+  shortcutVia,
   toggleSatisfied,
 } from "./engine.ts";
 import { newGraph, type Graph } from "./model.ts";
@@ -409,6 +411,62 @@ describe("前提の一括追加", () => {
     expect(parsed.errors).toEqual([]);
     const target = parsed.nodes.find((n) => n.id === "引っ越し")!;
     expect(target.requires).toEqual(["家", "お金"]);
+  });
+});
+
+describe("近道（要らなくなった直接の前提）", () => {
+  test("兄弟の下へ兄弟を繋ぐと、親からの直接の線が近道になる", () => {
+    // 一括追加で平らに並べたあと、「不動産に行く」が「引っ越し先の家」の前提だと気づいて繋いだ
+    const graph = g("引っ越し -> 引っ越し先の家, 引っ越し -> 不動産に行く, 引っ越し先の家 -> 不動産に行く");
+    expect(findShortcuts(graph, [{ from: "引っ越し先の家", to: "不動産に行く" }])).toEqual([
+      { from: "引っ越し", to: "不動産に行く", via: "引っ越し先の家" },
+    ]);
+  });
+
+  test("既にある道の上へ近道を足した場合は、足した線そのものを返す", () => {
+    const graph = g("引っ越し -> 引っ越し先の家 -> 不動産に行く, 引っ越し -> 不動産に行く");
+    expect(findShortcuts(graph, [{ from: "引っ越し", to: "不動産に行く" }])).toEqual([
+      { from: "引っ越し", to: "不動産に行く", via: "引っ越し先の家" },
+    ]);
+  });
+
+  test("祖先から子孫への線も拾う", () => {
+    // 目的 -> 途中 -> 下, 目的 -> 孫。新しく 下 -> 孫 を繋ぐと、2段上からの直接の線も近道
+    const graph = g("目的 -> 途中 -> 下 -> 孫, 目的 -> 孫");
+    expect(findShortcuts(graph, [{ from: "下", to: "孫" }])).toEqual([{ from: "目的", to: "孫", via: "途中" }]);
+  });
+
+  test("今回の追加と関係ない近道は掘り返さない", () => {
+    const graph = g("A -> B -> C, A -> C, X -> Y");
+    expect(findShortcuts(graph, [{ from: "X", to: "Y" }])).toEqual([]);
+  });
+
+  test("別の道が無ければ近道ではない", () => {
+    const graph = g("引っ越し -> 引っ越し先の家, 引っ越し -> お金を貯める");
+    expect(findShortcuts(graph, [{ from: "引っ越し", to: "お金を貯める" }])).toEqual([]);
+  });
+
+  test("contains を通る道は数えない", () => {
+    // 完了の伝わる向きが逆なので、外すとカスケードの届き方が変わる
+    const graph = g("親 -> [子], 子 -> 前提, 親 -> 前提");
+    expect(findShortcuts(graph, [{ from: "子", to: "前提" }])).toEqual([]);
+  });
+
+  test("輪の上では出さない（輪の中はどこからでも届く）", () => {
+    const graph = g("A -> B -> C -> B, A -> C");
+    expect(findShortcuts(graph, [{ from: "B", to: "C" }])).toEqual([]);
+  });
+
+  test("近道を外しても、どのノードの状態も変わらない", () => {
+    const graph = g("引っ越し -> 引っ越し先の家 -> 不動産に行く, 引っ越し -> 不動産に行く, 引っ越し -> お金を貯める");
+    graph.nodes["不動産に行く"]!.satisfied = true;
+    const before = Object.keys(graph.nodes).map((id) => resolveState(graph, id));
+    const via = shortcutVia(graph, "引っ越し", "不動産に行く");
+    expect(via).toBe("引っ越し先の家");
+    graph.nodes["引っ越し"]!.requires = graph.nodes["引っ越し"]!.requires.filter((id) => id !== "不動産に行く");
+    expect(Object.keys(graph.nodes).map((id) => resolveState(graph, id))).toEqual(before);
+    // 外したあとは近道ではない（唯一の道は切らせない）
+    expect(shortcutVia(graph, "引っ越し先の家", "不動産に行く")).toBeUndefined();
   });
 });
 

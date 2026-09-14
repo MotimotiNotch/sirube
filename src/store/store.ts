@@ -12,8 +12,10 @@ import {
   canUndo,
   captureUndo,
   planToggle,
+  shortcutVia,
   toggleSatisfied,
   type ReverseIndex,
+  type Shortcut,
   type TogglePlan,
   type ToggleUndo,
 } from "../core/engine.ts";
@@ -226,6 +228,23 @@ export class MarkdownGraphStore {
   }
 
   /**
+   * 近道（`findShortcuts`）をまとめて外す。**1件ずつ書く直前に確かめ直す**——
+   * 確認を出している間に外でファイルが変わり、もう別の道が無くなっていたら、
+   * それは近道ではなく唯一の繋がりなので切らない。返り値は実際に外したもの。
+   */
+  async detachShortcuts(graph: Graph, shortcuts: readonly Shortcut[]): Promise<Shortcut[]> {
+    const done: Shortcut[] = [];
+    for (const s of shortcuts) {
+      if (shortcutVia(graph, s.from, s.to) === undefined) continue;
+      const node = graph.nodes[s.from]!;
+      node.requires = node.requires.filter((id) => id !== s.to);
+      done.push(s);
+    }
+    await this.persist(graph, [...new Set(done.map((s) => s.from))]);
+    return done;
+  }
+
+  /**
    * `parent -> child` の**間に**新しいノードを差し込む。
    *
    * 追加と削除しか無いと、`A -> B` の間に `C` を入れるのに3手かかる——`C` を
@@ -314,10 +333,10 @@ export class MarkdownGraphStore {
   }
 
   private async applyDslResult(graph: Graph, parsed: DslParseResult): Promise<BulkResult> {
-    if (parsed.errors.length > 0) return { created: [], updated: [], errors: parsed.errors };
-    const { created, updated } = await this.mergeByName(graph, parsed.nodes);
+    if (parsed.errors.length > 0) return { created: [], updated: [], addedRequires: [], errors: parsed.errors };
+    const { created, updated, addedRequires } = await this.mergeByName(graph, parsed.nodes);
     await this.persist(graph, [...created, ...updated]);
-    return { created, updated, errors: [] };
+    return { created, updated, addedRequires, errors: [] };
   }
 
   /**
@@ -331,9 +350,10 @@ export class MarkdownGraphStore {
   private async mergeByName(
     graph: Graph,
     incoming: readonly Node[],
-  ): Promise<{ created: string[]; updated: string[] }> {
+  ): Promise<{ created: string[]; updated: string[]; addedRequires: { from: string; to: string }[] }> {
     const created: string[] = [];
     const updated: string[] = [];
+    const addedRequires: { from: string; to: string }[] = [];
 
     const byName = new Map<string, string>();
     for (const [id, node] of Object.entries(graph.nodes)) {
@@ -365,12 +385,15 @@ export class MarkdownGraphStore {
       const target = graph.nodes[idOf.get(inc.id)!]!;
       const before = target.requires.length + target.contains.length;
       const map = (ref: string): string => idOf.get(ref) ?? ref;
+      for (const to of new Set(inc.requires.map(map))) {
+        if (!target.requires.includes(to)) addedRequires.push({ from: target.id, to });
+      }
       target.requires = [...new Set([...target.requires, ...inc.requires.map(map)])];
       target.contains = [...new Set([...target.contains, ...inc.contains.map(map)])];
       const changed = target.requires.length + target.contains.length !== before;
       if (changed && !createdSet.has(target.id) && !updated.includes(target.id)) updated.push(target.id);
     }
-    return { created, updated };
+    return { created, updated, addedRequires };
   }
 
   /** 入口ファイル（MOC 3層）を書き直す。
@@ -468,6 +491,8 @@ const MINT_ATTEMPTS = 5;
 export interface BulkResult {
   created: string[];
   updated: string[];
+  /** 今回新しく足された `requires`。近道の検出（`findShortcuts`）に渡す。 */
+  addedRequires: { from: string; to: string }[];
   errors: { message: string; pos: number }[];
 }
 
