@@ -1684,6 +1684,10 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
      * 同じ場所で往復するので、押した後に別の場所へ戻る形にはしない。
      * 文字だけにしてあるのは、この行の左側（「今やれること」）が既に
      * 文字ボタンで、アイコンを1つだけ混ぜると語彙が増えるため。 */
+    // 切り替えのボタンは1つの入れ物にまとめて右端へ寄せる。ボタンごとに右寄せを
+    // 掛けると、2つ（俯瞰・地図）のときに余った幅を分け合って「俯瞰」が行の
+    // 真ん中に浮き、狭い窓では片方だけが次の行の左端へ折り返した（のっち 2026-09-14）。
+    let actions: HTMLElement | undefined;
     const appendToggle = (label: string, onClick: () => void): void => {
       const btn = h("button", { class: "crumb-toggle", type: "button" }, [label]);
       btn.addEventListener("click", () => {
@@ -1691,7 +1695,11 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         lastSwitchAt = Date.now();
         onClick();
       });
-      bar.append(btn);
+      if (!actions) {
+        actions = h("span", { class: "crumb-actions" });
+        bar.append(actions);
+      }
+      actions.append(btn);
     };
 
     const appendSep = (): void => {

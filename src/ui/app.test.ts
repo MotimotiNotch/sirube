@@ -2250,6 +2250,13 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     expect(text("inspector")).toContain("地図から外してあります");
   });
 
+  test("「俯瞰」と「地図」は1つの入れ物に並ぶ（別々に右寄せすると間が空く）", async () => {
+    await declareTauriGoal();
+    const holders = new Set([toggle("俯瞰"), toggle("地図")].map((b) => b.parentElement));
+    expect(holders.size).toBe(1);
+    expect([...holders][0]!.classList.contains("crumb-actions")).toBe(true);
+  });
+
   test("地図へ上がると、今いる場所を包む一番近いゴールが現在地になる", async () => {
     // 全体を出しても、自分がどこに居たのかは要る。深いところで作業していた人に
     // 印の無い全体図を見せると、迷子の逆になる。

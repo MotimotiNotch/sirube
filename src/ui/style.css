@@ -301,8 +301,16 @@ body.resizing { cursor: col-resize; user-select: none; }
    全部その値になる——ボタンに見えなかったのはこれが理由（2026-09-03）。
    CSS の順序と詳細度は happy-dom がスタイルを評価しないためテストで
    捕まらない。同じ罠を色見本でも踏んでいる。 */
-.breadcrumb .crumb-toggle {
+/* 右寄せは入れ物（.crumb-actions）に1回だけ掛ける。ボタンごとに `margin-left: auto`
+ * を掛けていた頃は、2つ並ぶと余った幅を分け合って「俯瞰」が行の真ん中に浮き、
+ * 狭い窓では「地図」だけが次の行の左端へ折り返した（地図を足した 09-12 から、
+ * のっち報告 2026-09-14）。 */
+.breadcrumb .crumb-actions {
   margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.breadcrumb .crumb-toggle {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   padding: 3px 12px;
