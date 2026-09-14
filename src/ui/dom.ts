@@ -79,3 +79,17 @@ export function toast(message: string): void {
 export function clear(node: HTMLElement): void {
   node.replaceChildren();
 }
+
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+
+/** 手元の時刻で `2026-09-14`。`due` と同じ書き方に揃える。 */
+export function formatDate(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** 手元の時刻で `2026-09-14 13:43`。 */
+export function formatDateTime(ms: number): string {
+  const d = new Date(ms);
+  return `${formatDate(ms)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}

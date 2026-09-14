@@ -1389,6 +1389,53 @@ describe("達成済みの括りへ中身を足す", () => {
   });
 });
 
+describe("最近の変更", () => {
+  const rowNames = (): string[] =>
+    Array.from($("center-body").querySelectorAll(".hit-name")).map((e) => e.textContent ?? "");
+
+  test("書き換わった新しい順に並び、作ったばかりのノードが先頭に来る", async () => {
+    $("nav-recent").click();
+    await tick();
+    expect(text("breadcrumb")).toContain("最近の変更");
+    expect($("nav-recent").classList.contains("active")).toBe(true);
+    expect($("nav-actionable").classList.contains("active")).toBe(false);
+    // サンプルは書いた順に時刻が進む。最後に書かれたのは「領収書整理」
+    expect(rowNames()[0]).toBe("領収書整理");
+    // 行に日付が出る（並んでいる理由）
+    expect($("center-body").querySelector(".hit-date")).toBeTruthy();
+
+    $("new-root-btn").click();
+    await tick();
+    const input = $("modal").querySelector("input") as HTMLInputElement;
+    input.value = "いま作った目的";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await tick();
+    $("nav-recent").click();
+    await tick();
+    expect(rowNames()[0]).toBe("いま作った目的");
+  });
+
+  test("「今やれること」には日付を出さない", async () => {
+    $("nav-actionable").click();
+    await tick();
+    expect($("center-body").querySelector(".hit-date")).toBeNull();
+  });
+
+  test("検索を打つと検索に切り替わり、消すと「今やれること」に戻る", async () => {
+    $("nav-recent").click();
+    await tick();
+    const input = $("search-input") as HTMLInputElement;
+    input.value = "確定";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    expect(text("breadcrumb")).toContain("検索結果");
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    await tick();
+    expect(text("breadcrumb")).toContain("今やれること");
+  });
+});
+
 describe("自動解決", () => {
   test("不整合が無い状態では実行ボタンを出さない", async () => {
     $("reconcile-btn").click();
@@ -1445,7 +1492,7 @@ describe("新しい目的", () => {
   });
 
   test("新しく作ったノードは詳細パネルに作成日と更新日が出る", async () => {
-    const { formatDate } = await import("./inspector.ts");
+    const { formatDate } = await import("./dom.ts");
     const before = formatDate(Date.now());
     $("new-root-btn").click();
     await tick();

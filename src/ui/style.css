@@ -465,6 +465,14 @@ body.no-inspector #inspector-resizer {
   font-variant-numeric: tabular-nums;
 }
 
+/* 「最近の変更」の日付。枠は付けない——合流や期限（判断に使う属性）と同じ
+ * 見た目にすると、並び順の理由でしかない日付が属性の1つに見える。 */
+.hit-date {
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 隣接は「文脈として出ているもの」なので、ヒット本体とはっきり分ける。
  * 混ざるとどれが検索結果なのか読めなくなる。 */
 .neighbors {

@@ -23,7 +23,7 @@ import {
   toggleSatisfied,
 } from "./engine.ts";
 import { newGraph, type Graph } from "./model.ts";
-import { countActionable, nextActions, pathFromRoot, search, stuckReport } from "./search.ts";
+import { countActionable, nextActions, pathFromRoot, recentlyChanged, search, stuckReport } from "./search.ts";
 
 /** DSL からテスト用グラフを組む。mtime は 0。 */
 function g(dsl: string): Graph {
@@ -483,6 +483,30 @@ describe("近道（要らなくなった直接の前提）", () => {
     expect(Object.keys(graph.nodes).map((id) => resolveState(graph, id))).toEqual(before);
     // 外したあとは近道ではない（唯一の道は切らせない）
     expect(shortcutVia(graph, "引っ越し先の家", "不動産に行く")).toBeUndefined();
+  });
+});
+
+describe("最近の変更", () => {
+  test("mtime の新しい順に並び、達成済みも含み、件数で切れる", () => {
+    const graph = g("目的 -> 古い, 目的 -> 新しい, 目的 -> 真ん中");
+    graph.nodes["古い"]!.mtimeMs = 1_000;
+    graph.nodes["真ん中"]!.mtimeMs = 2_000;
+    graph.nodes["新しい"]!.mtimeMs = 3_000;
+    graph.nodes["新しい"]!.satisfied = true; // 達成したばかりのものが「最後にやったこと」
+    graph.nodes["目的"]!.mtimeMs = 500;
+    const rev = buildReverseIndex(graph);
+    const result = recentlyChanged(graph, rev);
+    expect(result.hits.map((h) => h.id)).toEqual(["新しい", "真ん中", "古い", "目的"]);
+    expect(recentlyChanged(graph, rev, { limit: 2 }).hits.map((h) => h.id)).toEqual(["新しい", "真ん中"]);
+    expect(recentlyChanged(graph, rev, { limit: 2 }).total).toBe(4);
+  });
+
+  test("時刻を持たないノードと輪の案内は出さない", () => {
+    const graph = g("A -> B -> A, C");
+    graph.nodes["C"]!.mtimeMs = 1_000;
+    const result = recentlyChanged(graph, buildReverseIndex(graph));
+    expect(result.hits.map((h) => h.id)).toEqual(["C"]);
+    expect(result.cycles).toEqual([]);
   });
 });
 

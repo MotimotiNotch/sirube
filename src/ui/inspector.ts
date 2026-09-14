@@ -7,7 +7,7 @@ import { inDegree, progress, resolveState, type ReverseIndex } from "../core/eng
 import { isGoal } from "../core/goals.ts";
 import { GOAL_COLORS, isGoalColor, type GoalColor, type Graph, type NodeState } from "../core/model.ts";
 import { nodeCreatedAt } from "../core/ulid.ts";
-import { COLOR_LABEL, h, iconSpan, stateBadge, stateDot } from "./dom.ts";
+import { COLOR_LABEL, formatDate, formatDateTime, h, iconSpan, stateBadge, stateDot } from "./dom.ts";
 import type { MenuTarget } from "./context-menu.ts";
 import { renderNote } from "./note-view.ts";
 
@@ -384,18 +384,4 @@ export function renderInspector(
 
   // 「その他」はパネルの一番下。畳んであるので、開かない限り1行しか取らない。
   container.append(more);
-}
-
-const pad2 = (n: number): string => String(n).padStart(2, "0");
-
-/** 手元の時刻で `2026-09-14`。`due` と同じ書き方に揃える。 */
-export function formatDate(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
-/** 手元の時刻で `2026-09-14 13:43`。 */
-export function formatDateTime(ms: number): string {
-  const d = new Date(ms);
-  return `${formatDate(ms)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }

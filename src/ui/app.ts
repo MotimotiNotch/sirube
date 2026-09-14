@@ -8,7 +8,7 @@ import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
 import { enclosingGoal, goalLayer, isGoal, mapSeeds, type GoalLayer } from "../core/goals.ts";
 import { parseDsl } from "../core/dsl.ts";
 import { normalizeForDuplicateCheck, planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
-import { countActionable, nextActions, pathFromRoot, search } from "../core/search.ts";
+import { countActionable, nextActions, pathFromRoot, recentlyChanged, search } from "../core/search.ts";
 import type { SirubeFs } from "../store/fs.ts";
 import { MarkdownGraphStore } from "../store/store.ts";
 import { clear, el, h, iconSpan, stateDot, toast } from "./dom.ts";
@@ -56,6 +56,9 @@ interface AppState {
    * 目的の入口はこれまでどおり Chain View のままで、俯瞰はそこから切り替える
    * ——入口を差し替えると、分解しに行く導線が1クリック遠くなる。 */
   scopeId?: string;
+  /** 一覧を「最近の変更」で出すか（2026-09-14）。検索語があれば検索が勝ち、
+   *  俯瞰（`scopeId`）とは同時に立たない。「今やれること」と同じ1画面の別の顔。 */
+  recent: boolean;
   /** 右パネルの開閉。**ノードごとに持たない**——選び直すたびに畳み直すと、
    *  続けて同じ操作をするときに毎回開くことになる。メモの編集モードだけは
    *  選び直しで閉じる（別のノードを開いたのに書く顔のままだと、どれを書いて
@@ -118,6 +121,10 @@ export interface AppHandle {
  */
 const DOUBLE_TAP_GUARD_MS = 400;
 
+/** 「最近の変更」に並べる件数。再開の手がかりに要るのは直近のひと塊だけで、
+ *  全件を新しい順に並べると、それは一覧ではなく履歴になる（履歴は git が持つ）。 */
+const RECENT_LIMIT = 30;
+
 /** 表示用にフォルダ名だけ取る。区切りは Windows / POSIX どちらも来る。 */
 function basename(p: string): string {
   const parts = p.split(/[\/]/).filter(Boolean);
@@ -152,6 +159,8 @@ interface SavedPlace {
   focusId?: string;
   trail: string[];
   scopeId?: string;
+  /** 「最近の変更」を開いていたか。 */
+  recent?: boolean;
 }
 
 function savePlace(state: AppState): void {
@@ -161,6 +170,7 @@ function savePlace(state: AppState): void {
     ...(state.focusId ? { focusId: state.focusId } : {}),
     trail: state.trail,
     ...(state.scopeId ? { scopeId: state.scopeId } : {}),
+    ...(state.mode === "list" && state.recent ? { recent: true } : {}),
   };
   try {
     localStorage.setItem(PLACE_KEY, JSON.stringify(place));
@@ -210,6 +220,11 @@ function restorePlace(state: AppState): void {
     state.selectedId = saved.focusId;
     return;
   }
+  if (saved.mode === "list" && saved.recent === true) {
+    state.recent = true;
+    state.trail = [];
+    return;
+  }
   if (saved.mode === "list" && alive(saved.scopeId)) {
     state.scopeId = saved.scopeId;
     state.selectedId = saved.scopeId; // 俯瞰のパネルは絞っている目的そのものを指す
@@ -243,6 +258,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     layer: "detail",
     goals: goalLayer(graph, buildReverseIndex(graph)),
     query: "",
+    recent: false,
     trail: [],
     issues,
     plan: planReconcile(graph),
@@ -280,6 +296,9 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   searchInput.addEventListener("input", () => {
     state.query = searchInput.value;
     state.mode = "list";
+    // 検索欄を空に戻したら「今やれること」へ（placeholder がそう約束している）。
+    // 「最近の変更」から打ち始めても、消したときにそこへは戻さない。
+    state.recent = false;
     render();
   });
 
@@ -589,8 +608,14 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     input.focus();
   };
 
-  const goList = (scopeId?: string): void => {
+  const goList = (scopeId?: string, recent = false): void => {
     state.mode = "list";
+    state.recent = recent && !scopeId;
+    // 「最近の変更」は全体の話なので、検索語は捨てる（残すと検索が勝って、押した意味が消える）。
+    if (state.recent && state.query !== "") {
+      state.query = "";
+      searchInput.value = "";
+    }
     // 一覧は実グラフの話しかしない（俯瞰も検索も非ゴールを数える）ので、
     // 地図の縮尺を持ち込まない。持ち込むと、戻ったときに地図へ載っていない
     // ノードが地図の中心に据えられる。
@@ -1586,7 +1611,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     const nav = el<HTMLButtonElement>("nav-actionable");
     nav.replaceChildren();
     // 俯瞰は「全体の今やれること」ではないので、ここは点かない。
-    nav.className = `nav-item${state.mode === "list" && state.query === "" && !state.scopeId ? " active" : ""}`;
+    const onTopList = state.mode === "list" && state.query === "" && !state.scopeId;
+    nav.className = `nav-item${onTopList && !state.recent ? " active" : ""}`;
     nav.append(iconSpan("listChecks", 15), document.createTextNode("今やれること"));
     nav.append(h("span", { class: "count" }, [String(actionableCount)]));
     nav.onclick = () => {
@@ -1594,6 +1620,14 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       searchInput.value = "";
       goList();
     };
+
+    // 再開の手がかり（2026-09-14）。件数は出さない——「今やれること」の数は
+    // 判断に使うが、書き換わった件数は何も決めない（数字は判断に使うものだけ）。
+    const recentNav = el<HTMLButtonElement>("nav-recent");
+    recentNav.replaceChildren();
+    recentNav.className = `nav-item${onTopList && state.recent ? " active" : ""}`;
+    recentNav.append(iconSpan("clock", 15), document.createTextNode("最近の変更"));
+    recentNav.onclick = () => goList(undefined, true);
 
     const list = el("root-list");
     clear(list);
@@ -1691,7 +1725,11 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         });
         return;
       }
-      bar.append(h("span", { class: "current" }, [state.query === "" ? "今やれること" : `「${state.query}」の検索結果`]));
+      bar.append(
+        h("span", { class: "current" }, [
+          state.query !== "" ? `「${state.query}」の検索結果` : state.recent ? "最近の変更" : "今やれること",
+        ]),
+      );
       return;
     }
 
@@ -1754,18 +1792,22 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     // 俯瞰中だけ効き方が変わると、同じ場所で違う結果が出ることになる。
     const scopeId = state.query === "" ? state.scopeId : undefined;
     const scope = scopeId ? state.graph.nodes[scopeId] : undefined;
+    const recent = state.query === "" && !scopeId && state.recent;
     const result =
-      state.query === ""
-        ? nextActions(state.graph, state.rev, { cycles: state.cycles, ...(scopeId ? { under: scopeId } : {}) })
-        : search(state.graph, state.rev, { query: state.query, cycles: state.cycles });
+      state.query !== ""
+        ? search(state.graph, state.rev, { query: state.query, cycles: state.cycles })
+        : recent
+          ? recentlyChanged(state.graph, state.rev, { cycles: state.cycles, limit: RECENT_LIMIT })
+          : nextActions(state.graph, state.rev, { cycles: state.cycles, ...(scopeId ? { under: scopeId } : {}) });
     renderList(
       body,
       state.graph,
       result,
       {
-        title: state.query === "" ? "今やれること" : "検索結果",
+        title: state.query !== "" ? "検索結果" : recent ? "最近の変更" : "今やれること",
         query: state.query,
         ...(scope ? { scoped: true } : {}),
+        ...(recent ? { recent: true } : {}),
       },
       {
         onSelect: (id) => {

@@ -16,7 +16,7 @@
 
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
 import type { SearchResult } from "../core/search.ts";
-import { h, iconSpan, stateBadge } from "./dom.ts";
+import { formatDate, formatDateTime, h, iconSpan, stateBadge } from "./dom.ts";
 
 export interface ListCallbacks {
   onSelect(id: string): void;
@@ -27,11 +27,12 @@ export function renderList(
   container: HTMLElement,
   graph: Graph,
   result: SearchResult,
-  opts: { title: string; query: string; scoped?: boolean },
+  opts: { title: string; query: string; scoped?: boolean; recent?: boolean },
   cb: ListCallbacks,
 ): void {
   container.replaceChildren();
   const isSearch = opts.query !== "";
+  const recent = opts.recent === true && !isSearch;
 
   // 見出しはパンくずが出している。ここで繰り返さない。件数だけは検索時に要る
   // （サイドバーのカウントは「今やれること」の数しか持っていない）。
@@ -52,7 +53,9 @@ export function renderList(
   if (result.hits.length === 0) {
     const msg = isSearch
       ? "一致するノードがありません。"
-      : result.cycles.length > 0
+      : recent
+        ? "まだ書き換わったノードがありません。"
+        : result.cycles.length > 0
         ? "今やれることがありません。上の輪をほどくと動き出します。"
         : "今やれることがありません。";
     container.append(h("div", { class: "empty" }, [msg]));
@@ -114,6 +117,11 @@ export function renderList(
     }
     if (hit.due) meta.append(h("span", { class: "hit-indegree", title: "期限" }, [hit.due]));
     if (mixedState) meta.append(stateBadge(hit.state));
+    // 「最近の変更」では、並んでいる理由（いつ書き換わったか）を行に出す。
+    // 日付だけ出して時刻はツールチップ（詳細パネルと同じ出し方）。
+    if (recent && node.mtimeMs > 0) {
+      meta.append(h("span", { class: "hit-date", title: `更新 ${formatDateTime(node.mtimeMs)}` }, [formatDate(node.mtimeMs)]));
+    }
     main.append(meta);
     main.addEventListener("click", () => cb.onSelect(hit.id));
     card.append(main);

@@ -10,14 +10,15 @@
 // `trash` に改名したので、そこで 404 で止まる。中身は同一（バイト単位で一致）
 // なので画面は壊れていない——直すなら NAMES と `icons.ts` のキー、その参照元を
 // まとめて `trash` へ寄せる。**全アイコンを取り直す操作**なので、他のアイコンの
-// 上流変更も一緒に入る。だから `undo-2` の1件はこのスクリプトを通さず、同じ
-// 正規化で手で足してある。
+// 上流変更も一緒に入る。だから `undo-2` と `clock`（2026-09-14、「最近の変更」用）
+// はこのスクリプトを通さず、同じ正規化で1件ずつ足してある。なお `history` も
+// 上流で 404 だった（2026-09-14 確認）。
 
 const NAMES = [
   "compass", "search", "circle-check", "circle", "circle-slash", "repeat",
   "plus", "trash-2", "chevron-right", "x", "corner-down-right", "layers",
   "triangle-alert", "wand-sparkles", "list-checks", "pencil", "arrow-left",
-  "folder-open", "info", "sticky-note", "undo-2",
+  "folder-open", "info", "sticky-note", "undo-2", "clock",
 ];
 
 const SOURCE = "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons";

@@ -186,6 +186,40 @@ export function search(g: Graph, rev: ReverseIndex, opts: SearchOptions = {}): S
   };
 }
 
+/**
+ * 最近書き換わったノード。**再開の手がかり**（2026-09-14、のっち「足りない機能」の2番目）。
+ *
+ * 「半年空けても道が残っている」を約束しているのに、開き直したときに出るのは
+ * 前回見ていた場所だけで、「何を動かしていたか」は画面のどこにも無かった。
+ * 生成 MOC は既に `lastTouched` で新しい順に並べているので、同じ手がかりを
+ * アプリにも出す。
+ *
+ * 並べる鍵はファイルの mtime。**本人が触った順ではない**——カスケードで一緒に
+ * 書かれたもの、前提を足された親、AI や git が書いたものも上に来る。それでも
+ * 「このあたりが動いていた」は分かるので、区別する仕組みは足さない（足すなら
+ * 書いた主体をファイルに持つことになり、`updated` を持たない方針とぶつかる）。
+ *
+ * 状態では絞らない。達成したばかりのものが「最後にやったこと」そのものなので。
+ * 検索の形（`SearchResult`）で返し、一覧の描画をそのまま使う。
+ */
+export function recentlyChanged(
+  g: Graph,
+  rev: ReverseIndex,
+  opts: { limit?: number; cycles?: CycleInfo } = {},
+): SearchResult {
+  const all = search(g, rev, { neighborDepth: 0, ...(opts.cycles ? { cycles: opts.cycles } : {}) });
+  const mtime = (id: string): number => g.nodes[id]?.mtimeMs ?? 0;
+  const hits = all.hits
+    .filter((hit) => mtime(hit.id) > 0)
+    .sort((a, b) => mtime(b.id) - mtime(a.id) || a.id.localeCompare(b.id));
+  return {
+    hits: opts.limit === undefined ? hits : hits.slice(0, opts.limit),
+    total: hits.length,
+    // 輪の案内は「今やれることが空の理由」を言うためのもの。ここでは出さない。
+    cycles: [],
+  };
+}
+
 /** 横断 Next Action ビュー。検索の特殊形（空クエリ + ACTIONABLE）。 */
 export function nextActions(
   g: Graph,
