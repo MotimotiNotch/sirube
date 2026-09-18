@@ -47,6 +47,13 @@ export type Fix =
       parent: string;
     }
   | {
+      kind: "unsatisfy-contains-parent";
+      /** 達成済みだった親。子の方が新しい＝「戻した」が最新の意図。 */
+      parent: string;
+      /** 未達成のまま親の下に残っていた `contains` の子。 */
+      child: string;
+    }
+  | {
       kind: "create-missing-node";
       /** 参照されているのに実体が無かった id。 */
       id: string;
@@ -149,6 +156,17 @@ export function planReconcile(g: Graph): ReconcilePlan {
   const rev = buildReverseIndex(g);
   const tieSeen = new Set<string>();
 
+  /** 同着を1組につき1回だけ報告するためのキー。
+   *
+   * **区切り文字を挟む書き方をやめた**（2026-09-18）。ノード id はファイル名
+   * 由来で任意の文字を含みうるので、普通の区切りでは別の組が同じキーに潰れる。
+   * そこで NUL を挟んでいたが、**その1バイトをエスケープ表記で書いたつもりが
+   * 生のまま埋まる事故を3回起こしている**（2026-09-01 このファイル、09-14
+   * `engine.ts`、09-18 再びこのファイル）。生の NUL が入ると git と grep が
+   * バイナリ扱いに切り替わり、差分も一致行も出なくなる。しかもテストは通るので
+   * 気付けない。配列を JSON にすれば、区切りの心配自体が消える。 */
+  const pairKey = (a: string, b: string): string => JSON.stringify([a, b]);
+
   /**
    * 作業用の状態を1つ変える。**同じノードが2度目の反転をしようとしたら止める。**
    *
@@ -197,11 +215,8 @@ export function planReconcile(g: Graph): ReconcilePlan {
 
         if (Math.abs(apart) < MTIME_TOLERANCE_MS) {
           // 近すぎて判断できない。一括書き込みの直後がこれ（`git clone` /
-          // `git pull` / 番号の移行 / AI のまとめ書き）。区切りは NUL。ノード id
-          // はファイル名由来で任意の文字を含みうるため、通常の区切り文字だと
-          // 別の組が同じキーに潰れる。ソースには生バイトではなくエスケープで書く
-          // （生の NUL があると grep や差分がバイナリ扱いになる）。
-          const key = `${id}\u0000${req}`;
+          // `git pull` / 番号の移行 / AI のまとめ書き）。
+          const key = pairKey(id, req);
           if (!tieSeen.has(key)) {
             tieSeen.add(key);
             unresolved.push({ kind: "mtime-tie", node: id, prerequisite: req });
@@ -221,10 +236,47 @@ export function planReconcile(g: Graph): ReconcilePlan {
           break; // このノードはもう達成ではないので、残りの前提は見なくてよい
         }
       }
+
+      // `contains` の子が未達のまま達成になっている親を戻す（2026-09-18）。
+      //
+      // ここが通っていなかった間、「親が達成 / 子が未達」は `fixes` にも
+      // `unresolved` にも出ず、**画面のどこにも現れなかった**。実データで
+      // 踏んだ: ゴール `モノクロEVF機を1台手に入れる` の下の `ボディを買う`
+      // `標準レンズを1本買う` を（注文キャンセルで）未達に戻しても、ゴールは
+      // 達成のまま `SATISFIED` で残り、自動解決のバッジも立たなかった。
+      //
+      // **埋める向きは作らない。** 親が新しいときに子を達成にしてはいけない
+      // ——`cascadeSatisfyRequires` が `contains` を辿らないのと同じ理由で、
+      // 親が満たされても部品が揃ったことにはならない。親が新しい場合は
+      // 2026-08-26 の判断どおり「到達した達成は記録として残す」ので何もしない。
+      if (!sat.get(id)) continue; // 前提側で戻ったなら、もう親ではなく未達
+      for (const child of containsOf(id)) {
+        if (sat.get(child)) continue;
+        if (cyclic.has(child)) continue;
+
+        const apart = (mtime.get(id) ?? 0) - (mtime.get(child) ?? 0);
+
+        if (Math.abs(apart) < MTIME_TOLERANCE_MS) {
+          const key = pairKey(id, child);
+          if (!tieSeen.has(key)) {
+            tieSeen.add(key);
+            unresolved.push({ kind: "mtime-tie", node: id, prerequisite: child });
+          }
+        } else if (apart < 0) {
+          // 子の方が新しい ＝「戻した」が最新の意図 → 親を未達成に戻す
+          if (setSat(id, false)) {
+            fixes.push({ kind: "unsatisfy-contains-parent", parent: id, child });
+            changed = true;
+          }
+          break; // この親はもう達成ではないので、残りの子は見なくてよい
+        }
+      }
     }
 
-    // contains の子が全部揃った親を達成にする。直し方が一方向しかないので
-    // 時刻を見る必要がない（contains は逆カスケードしない仕様）。
+    // contains の子が全部揃った親を達成にする。**こちらは時刻を見ない**——
+    // 「子が全部揃った」は矛盾ではなく単に集約が済んでいない状態で、直し方が
+    // 一方向しかない。時刻を見るのは戻す側（上の `unsatisfy-contains-parent`）
+    // だけで、あちらは「達成のまま残すか戻すか」の2解釈があるため。
     //
     // **前提も見る。** `contains` だけで判断すると、未達の `requires` を持つ親を
     // 立ててしまい、①（前提の方が新しければ戻す）と逆を向いて振動する。
@@ -304,6 +356,14 @@ export function applyPlan(g: Graph, plan: ReconcilePlan): string[] {
         const n = g.nodes[fix.parent];
         if (n && !n.satisfied) {
           n.satisfied = true;
+          changed.add(fix.parent);
+        }
+        break;
+      }
+      case "unsatisfy-contains-parent": {
+        const n = g.nodes[fix.parent];
+        if (n && n.satisfied) {
+          n.satisfied = false;
           changed.add(fix.parent);
         }
         break;

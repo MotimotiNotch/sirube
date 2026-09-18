@@ -1565,6 +1565,9 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
           case "satisfy-contains-parent":
             li.append(h("span", { class: "plan-kind" }, ["親を達成に"]), `${nameOf(f.parent)}（子が全部揃った）`);
             break;
+          case "unsatisfy-contains-parent":
+            li.append(h("span", { class: "plan-kind" }, ["達成を戻す"]), `${nameOf(f.parent)}（中身の ${nameOf(f.child)} が未達で、そちらの方が新しい）`);
+            break;
           case "create-missing-node":
             li.append(h("span", { class: "plan-kind" }, ["空ノード作成"]), `${f.id}（${f.referencedBy.map(nameOf).join(", ")} が参照）`);
             break;

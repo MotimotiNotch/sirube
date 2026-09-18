@@ -183,7 +183,12 @@ describe("カスケード", () => {
     expect(graph.nodes["不動産に行く"]!.satisfied).toBe(true); // 前提は残る
   });
 
-  test("contains は子が全部揃うと親が自動達成、戻しても親は戻らない", () => {
+  test("contains は子が全部揃うと親が自動達成、1つ戻すと親も戻る", () => {
+    // **2026-09-18 に向きが増えた。** それまでは一方向で、子を戻しても親は
+    // 達成のまま残っていた（2026-08-26「到達した達成は記録として残す」）。
+    // 残す判断そのものは否定していないが、黙って残すと「親が達成 / 子が未達」が
+    // どの画面にも出ないままになる。いまは `planToggle` の一覧に `dependent`
+    // として出てから書かれるので、残したければ確認で止められる。
     const graph = g("MVP -> [ストア] -> [検索]");
     const rev = buildReverseIndex(graph);
     toggleSatisfied(graph, "ストア", rev);
@@ -191,7 +196,8 @@ describe("カスケード", () => {
     toggleSatisfied(graph, "検索", rev);
     expect(graph.nodes["MVP"]!.satisfied).toBe(true);
     toggleSatisfied(graph, "検索", rev);
-    expect(graph.nodes["MVP"]!.satisfied).toBe(true); // 一方向（2026-08-26 の判断）
+    expect(graph.nodes["MVP"]!.satisfied).toBe(false);
+    expect(graph.nodes["ストア"]!.satisfied).toBe(true); // 兄弟には触らない
   });
 
   test("親に未達の前提があれば、子が揃っても親は立てない", () => {
@@ -261,6 +267,42 @@ describe("トグルの下見", () => {
       { kind: "target", id: "引っ越し先の家", satisfied: false },
       { kind: "dependent", id: "引っ越し", via: "引っ越し先の家" },
     ]);
+  });
+
+  test("取り消しの下見は contains の親も挙げる", () => {
+    // 2026-09-18 まで一方向で、子を戻しても親は達成のまま残っていた。
+    // 親には固有の作業が無いので、中身が崩れたら親も終わっていない。
+    const graph = g("目的 -> [部品A], 目的 -> [部品B]");
+    for (const id of Object.keys(graph.nodes)) graph.nodes[id]!.satisfied = true;
+    const plan = planToggle(graph, "部品A", buildReverseIndex(graph));
+    expect(plan.satisfied).toBe(false);
+    expect(plan.changes).toEqual([
+      { kind: "target", id: "部品A", satisfied: false },
+      { kind: "dependent", id: "目的", via: "部品A" },
+    ]);
+  });
+
+  test("contains の親を戻すと、その上の親まで遡る", () => {
+    // 実データの形（`整える機能` -> `整合性の自動解決` -> チケット）。1段で
+    // 止めると、孫を戻したときに祖父だけが達成のまま取り残される。
+    const graph = g("整える機能 -> [整合性の自動解決], 整合性の自動解決 -> [チケット]");
+    for (const id of Object.keys(graph.nodes)) graph.nodes[id]!.satisfied = true;
+    const plan = planToggle(graph, "チケット", buildReverseIndex(graph));
+    expect(plan.changes).toEqual([
+      { kind: "target", id: "チケット", satisfied: false },
+      { kind: "dependent", id: "整合性の自動解決", via: "チケット" },
+      { kind: "dependent", id: "整える機能", via: "整合性の自動解決" },
+    ]);
+  });
+
+  test("contains の親を戻すとき、書き込む値は未達成", () => {
+    // `valueOf` は `dependent` だけを false にする。親を別の種類で記録すると
+    // 「一覧には出るのに true で書かれる」という取り違えが起きる。
+    const graph = g("目的 -> [部品A]");
+    for (const id of Object.keys(graph.nodes)) graph.nodes[id]!.satisfied = true;
+    const rev = buildReverseIndex(graph);
+    applyTogglePlan(graph, planToggle(graph, "部品A", rev));
+    expect(graph.nodes["目的"]!.satisfied).toBe(false);
   });
 
   test("既に達成済みの前提は連動に数えない", () => {

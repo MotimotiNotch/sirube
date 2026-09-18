@@ -276,8 +276,20 @@ export function cascadeSatisfyRequires(
 }
 
 /**
- * 未達成に戻したノードに依存していたもの（下流）も未達成に戻す。
+ * 未達成に戻したノードに依存していたものも未達成に戻す。
  * 「前提が崩れたなら、その上に積んだものも本当は終わっていない」。
+ *
+ * 依存には2種類ある。**自分を `requires` するもの**と、**自分を `contains`
+ * する親**。どちらのエッジも「何が必要か」を表していて、違うのは完了の伝わる
+ * 向きだけなので、崩れたときに上が本当は終わっていないことは同じ（`contains`
+ * の親には固有の作業が無いぶん、むしろ直接的に終わっていない）。
+ *
+ * `contains` の親を戻すのは 2026-09-18 に足した。それまでは一方向で（2026-08-26
+ * 「到達した達成は記録として残す」）、子を戻しても親は達成のまま残っていた。
+ * 代償が記録の保持ではなく**矛盾の不可視化**として出ていた——自動解決も
+ * `requires` しか見ていなかったので、「親が達成 / 子が未達」がどの画面にも
+ * 現れなかった。記録として残すかどうかは、黙って残すのではなく**確認で聞く**
+ * （`planToggle` がこの関数を通すので、`dependent` の一覧に出てから書かれる）。
  *
  * 前提側には触らない——1つ戻したからといって、その前にやったことが
  * 無かったことにはならない。
@@ -295,7 +307,11 @@ export function cascadeUnsatisfyDependents(
 ): void {
   if (seen.has(nodeId)) return;
   seen.add(nodeId);
-  for (const depId of rev.requiredBy.get(nodeId) ?? []) {
+  const dependents = new Set([
+    ...(rev.requiredBy.get(nodeId) ?? []),
+    ...(rev.containedBy.get(nodeId) ?? []),
+  ]);
+  for (const depId of dependents) {
     const dep = g.nodes[depId];
     if (!dep) continue;
     if (dep.satisfied) {
@@ -314,8 +330,10 @@ export function cascadeUnsatisfyDependents(
  * の判定は `resolveState()` と同じでなければならない——片方だけが両エッジを
  * 見ていると、導出とカスケードが別のことを言い始める。
  *
- * 一方向のみ（2026-08-26 のっち判断）。子を1つ戻しても親は自動では戻さない
- * ——到達した達成は記録として残す。
+ * 立てる向きだけがここ。**戻す向きは `cascadeUnsatisfyDependents` に移した**
+ * （2026-09-18）。2026-08-26 に「一方向のみ／到達した達成は記録として残す」と
+ * 決めたが、残す判断を黙って適用すると矛盾が画面に出ないままになるため、
+ * 確認の一覧に出してから書く形へ変えた。
  */
 export function cascadeSatisfyContainsParents(
   g: Graph,

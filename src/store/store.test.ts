@@ -343,6 +343,52 @@ ${fm}`));
     expect(plan.fixes).toEqual([{ kind: "unsatisfy-node", node: "A", prerequisite: "B" }]);
   });
 
+  test("contains の子の方が新しい → 親の達成を戻す", async () => {
+    // これが出ていなかった間、「親が達成 / 子が未達」はどの画面にも現れなかった。
+    const { graph } = await build({
+      A: { fm: "satisfied: true\nrequires: []\ncontains:\n  - B", mtime: 10000 },
+      B: { fm: "satisfied: false\nrequires: []\ncontains: []", mtime: 20000 },
+    });
+    const plan = planReconcile(graph);
+    expect(plan.fixes).toEqual([{ kind: "unsatisfy-contains-parent", parent: "A", child: "B" }]);
+    expect(plan.unresolved).toEqual([]);
+  });
+
+  test("contains の親の方が新しい → 到達した達成は残す（何も提案しない）", async () => {
+    // 2026-08-26 の判断。**埋める向きは作らない**——親が満たされても部品が
+    // 揃ったことにはならないので、子を勝手に達成にしてはいけない。
+    const { graph } = await build({
+      A: { fm: "satisfied: true\nrequires: []\ncontains:\n  - B", mtime: 20000 },
+      B: { fm: "satisfied: false\nrequires: []\ncontains: []", mtime: 10000 },
+    });
+    const plan = planReconcile(graph);
+    expect(plan.fixes).toEqual([]);
+    expect(plan.unresolved).toEqual([]);
+  });
+
+  test("contains の子と mtime 同着は解決せず残す", async () => {
+    const { graph } = await build({
+      A: { fm: "satisfied: true\nrequires: []\ncontains:\n  - B", mtime: 50000 },
+      B: { fm: "satisfied: false\nrequires: []\ncontains: []", mtime: 50000 },
+    });
+    const plan = planReconcile(graph);
+    expect(plan.fixes).toEqual([]);
+    expect(plan.unresolved).toEqual([{ kind: "mtime-tie", node: "A", prerequisite: "B" }]);
+  });
+
+  test("戻した親を立て直そうとしない（satisfy と unsatisfy が振動しない）", async () => {
+    // 子が2つあり片方だけ未達。親を戻したあと「子が全部揃った」で立て直すと
+    // 2026-09-02 と同じ振動になる。
+    const { graph } = await build({
+      A: { fm: "satisfied: true\nrequires: []\ncontains:\n  - B\n  - C", mtime: 10000 },
+      B: { fm: "satisfied: false\nrequires: []\ncontains: []", mtime: 30000 },
+      C: { fm: "satisfied: true\nrequires: []\ncontains: []", mtime: 20000 },
+    });
+    const plan = planReconcile(graph);
+    expect(plan.fixes).toEqual([{ kind: "unsatisfy-contains-parent", parent: "A", child: "B" }]);
+    expect(plan.unresolved).toEqual([]);
+  });
+
   test("mtime 同着は解決せず残す（git checkout 直後など）", async () => {
     const { graph } = await build({
       A: { fm: "satisfied: true\nrequires:\n  - B\ncontains: []", mtime: 50000 },
