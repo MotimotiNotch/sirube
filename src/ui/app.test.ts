@@ -610,18 +610,24 @@ describe("グラフの拡大縮小と移動", () => {
     expect(btn.classList.contains("hidden")).toBe(true);
   });
 
-  test("掴んで動かした指をノードの上で離しても、そのノードへ潜らない", async () => {
-    const node = Array.from($("center-body").querySelectorAll("g.graph-node")).find(
-      (g) => g.querySelector("title")?.textContent === "MVP実装完了",
-    )!;
+  test("掴んで動かした指をノードの上で離しても、そのノードを選ばない", async () => {
+    // 描き直しで要素が差し替わるので、押すたびに探し直す。
+    const node = (): Element =>
+      Array.from($("center-body").querySelectorAll("g.graph-node")).find(
+        (g) => g.querySelector("title")?.textContent === "MVP実装完了",
+      )!;
     const before = text("breadcrumb");
     drag(40, 0);
-    node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    node().dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await tick();
     expect(text("breadcrumb")).toBe(before);
+    expect(node().classList.contains("selected")).toBe(false);
 
-    // 飲むのは1回だけ。次の普通のクリックは通る。
-    node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // 飲むのは1回だけ。次の普通のクリックは通る（1回目は選ぶ、2回目で潜る）。
+    node().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    expect(node().classList.contains("selected")).toBe(true);
+    node().dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await tick();
     expect(text("breadcrumb")).toContain("MVP実装完了");
   });
@@ -636,7 +642,8 @@ describe("グラフの拡大縮小と移動", () => {
     drag(1, 0);
     node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await tick();
-    expect(text("breadcrumb")).toContain("MVP実装完了");
+    // 飲まれていなければ選ばれる（2026-09-14 から1回目は選ぶだけ）
+    expect(text("inspector")).toContain("MVP実装完了");
   });
 
   test("描き直しでは表示が飛ばず、潜ると初期位置に戻る", async () => {
@@ -705,14 +712,13 @@ describe("Chain View の表示量", () => {
     // サンプルでは `新リポジトリを作る` が4箇所から要求されている。
     findButton("root-list", "Sirube をリリースする")!.click();
     await tick();
-    Array.from($("center-body").querySelectorAll("g.graph-node"))
-      .find((g) => g.querySelector("title")?.textContent === "MVP実装完了")!
-      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    await tick();
-    Array.from($("center-body").querySelectorAll("g.graph-node"))
-      .find((g) => g.querySelector("title")?.textContent === "Markdownノードストア")!
-      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    await tick();
+    // 選んでからもう一度押すと潜る（2026-09-14）
+    for (const label of ["MVP実装完了", "MVP実装完了", "Markdownノードストア", "Markdownノードストア"]) {
+      Array.from($("center-body").querySelectorAll("g.graph-node"))
+        .find((g) => g.querySelector("title")?.textContent === label)!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await tick();
+    }
     const merged = Array.from($("center-body").querySelectorAll("g.graph-node .merge"));
     expect(merged.length).toBeGreaterThan(0);
     expect(merged[0]!.firstChild?.nodeValue).toMatch(/^\d+$/);
@@ -793,10 +799,13 @@ describe("目的の俯瞰（配下の今やれること）", () => {
   });
 
   test("潜った先で俯瞰しても、辿ってきた道は消えない", async () => {
-    Array.from($("center-body").querySelectorAll("g.graph-node"))
-      .find((g) => g.querySelector("title")?.textContent === "MVP実装完了")!
-      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    await tick();
+    // 選んでからもう一度押すと潜る（2026-09-14）
+    for (let i = 0; i < 2; i += 1) {
+      Array.from($("center-body").querySelectorAll("g.graph-node"))
+        .find((g) => g.querySelector("title")?.textContent === "MVP実装完了")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await tick();
+    }
     toggle("俯瞰").click();
     await tick();
     // 絞る対象が変わっても「今どこにいるか」は変わらない。道が消えると
@@ -1897,6 +1906,11 @@ describe("グラフのノードを押したとき", () => {
     graphNode(label).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await tick();
   };
+  /** 選んでからもう一度押す（2026-09-14 から、移るのは選んでいるノードを押したときだけ）。 */
+  const enterNode = async (label: string): Promise<void> => {
+    await clickNode(label);
+    await clickNode(label);
+  };
 
   test("下に何も無いノードは潜らない。選ぶだけ", async () => {
     findButton("root-list", "確定申告")!.click();
@@ -1944,19 +1958,26 @@ describe("グラフのノードを押したとき", () => {
 
     // 陽性対照。実体のある子を持つ方は、これまでどおり潜れる。
     // これが無いと、クリックが丸ごと壊れていても下の否定検査は通る。
-    await clickNode("実子持ち");
+    await enterNode("実子持ち");
     expect(text("breadcrumb")).toContain("実子持ち");
 
     findButton("root-list", "親")!.click();
     await tick();
-    await clickNode("幽霊持ち");
+    await enterNode("幽霊持ち");
     expect(text("breadcrumb")).not.toContain("幽霊持ち");
     expect(text("inspector")).toContain("幽霊持ち");
   });
 
-  test("下に何かあるノードはこれまでどおり潜る", async () => {
+  test("下に何かあるノードも1回目は選ぶだけ。選んでいるのをもう一度押すと潜る", async () => {
+    // 押すと必ず潜っていた頃は、潜らずに選んで右パネルで見る手段が右クリック
+    // しか無かった（のっち報告 2026-09-14「選択と中に入るのが一緒になってる」）。
     findButton("root-list", "Sirube をリリースする")!.click();
     await tick();
+    await clickNode("MVP実装完了");
+    expect(text("breadcrumb")).not.toContain("MVP実装完了");
+    expect(text("inspector")).toContain("MVP実装完了");
+    expect(graphNode("MVP実装完了").classList.contains("selected")).toBe(true);
+
     await clickNode("MVP実装完了");
     expect(text("breadcrumb")).toContain("MVP実装完了");
     expect($("center-body").querySelector("svg")).toBeTruthy();
@@ -1965,10 +1986,10 @@ describe("グラフのノードを押したとき", () => {
   test("入ったノードをもう一度押すと1つ戻る（入口と出口を同じにする）", async () => {
     findButton("root-list", "Sirube をリリースする")!.click();
     await tick();
-    await clickNode("MVP実装完了");
+    await enterNode("MVP実装完了");
     expect(text("breadcrumb")).toContain("MVP実装完了");
 
-    // 焦点になっている当人を押す。潜る前の場所が中心に戻る。
+    // 焦点になっている当人を押す（潜った直後は焦点が選ばれている）。潜る前の場所が中心に戻る。
     await clickNode("MVP実装完了");
     expect(text("breadcrumb")).not.toContain("MVP実装完了");
     expect(text("breadcrumb")).toContain("Sirube をリリースする");
@@ -1977,20 +1998,37 @@ describe("グラフのノードを押したとき", () => {
     expect(text("inspector")).toContain("MVP実装完了");
   });
 
-  test("2段潜ってから2回押すと、1段ずつ戻る", async () => {
+  test("2段潜ってから、焦点を選んで押すと1段ずつ戻る", async () => {
     findButton("root-list", "Sirube をリリースする")!.click();
     await tick();
-    await clickNode("MVP実装完了");
-    await clickNode("Markdownノードストア");
+    await enterNode("MVP実装完了");
+    await enterNode("Markdownノードストア");
     expect(text("breadcrumb")).toContain("Markdownノードストア");
 
     await clickNode("Markdownノードストア");
     expect(text("breadcrumb")).toContain("MVP実装完了");
     expect(text("breadcrumb")).not.toContain("Markdownノードストア");
 
+    // 戻った直後は、押したノード（Markdownノードストア）を選んだまま。新しい焦点は
+    // 1回目で選ぶだけで、2回目で戻る。
+    await clickNode("MVP実装完了");
+    expect(text("breadcrumb")).toContain("MVP実装完了");
     await clickNode("MVP実装完了");
     expect(text("breadcrumb")).toContain("Sirube をリリースする");
     expect(text("breadcrumb")).not.toContain("MVP実装完了");
+  });
+
+  test("焦点も、選んでいないうちに押すと選ぶだけで戻らない", async () => {
+    // 焦点にだけ「押すと移る」が残ると、焦点を選び直そうとしただけで上へ戻る。
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    await enterNode("MVP実装完了");
+    await clickNode("Markdownノードストア"); // 子を選ぶ（潜らない）
+    expect(text("inspector")).toContain("Markdownノードストア");
+
+    await clickNode("MVP実装完了");
+    expect(text("breadcrumb")).toContain("MVP実装完了"); // 戻っていない
+    expect(text("inspector")).toContain("MVP実装完了"); // 選び直しただけ
   });
 
   test("潜っていなければ押しても動かない。選び直すだけ", async () => {
@@ -2475,7 +2513,10 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     // 浅い場所に降ろされる（実データで66ノード中54、平均2.4段ぶん）。
     findButton("root-list", "Sirube をリリースする")!.click();
     await tick();
+    // 選んでからもう一度押すと潜る（2026-09-14）
     await clickNode("MVP実装完了");
+    await clickNode("MVP実装完了");
+    await clickNode("Markdownノードストア");
     await clickNode("Markdownノードストア");
     const before = crumb();
 
@@ -2499,6 +2540,7 @@ describe("ゴールの地図（もっと俯瞰）", () => {
     findButton("inspector", "地図から外す")!.click();
     await tick();
     await clickNode("MVP実装完了");
+    await clickNode("MVP実装完了"); // 選んでからもう一度押すと潜る（2026-09-14）
 
     toggle("地図").click();
     await tick();
