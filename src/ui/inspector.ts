@@ -140,12 +140,12 @@ export function renderInspector(
 
   // 主要な操作
   const actions = h("div", { class: "insp-row" });
-  const toggle = h("button", { class: `btn${state === "SATISFIED" ? "" : " primary"}`, type: "button" });
+  const toggle = h("button", { class: `btn${state === "SATISFIED" ? "" : " primary"}`, type: "button", "data-tour": "toggle" });
   toggle.append(iconSpan("circleCheck", 14), state === "SATISFIED" ? "達成を取り消す" : "達成にする");
   toggle.addEventListener("click", () => cb.onToggle(selectedId));
   actions.append(toggle);
 
-  const bulk = h("button", { class: "btn", type: "button" });
+  const bulk = h("button", { class: "btn", type: "button", "data-tour": "decompose" });
   bulk.append(iconSpan("plus", 14), "分解する");
   bulk.addEventListener("click", () => cb.onBulkAdd(selectedId));
   actions.append(bulk);
@@ -173,6 +173,7 @@ export function renderInspector(
   const moreBtn = h("button", {
     class: `insp-more-btn${view.moreOpen ? " open" : ""}`,
     type: "button",
+    "data-tour": "more",
     "aria-expanded": view.moreOpen ? "true" : "false",
   });
   moreBtn.append(iconSpan("chevronRight", 12), "その他");
@@ -375,7 +376,7 @@ export function renderInspector(
   // 入次数0なので、中間ノードを消すとその子が目的としてサイドバーに現れる——
   // 構造としては正しいが、削除の副作用としては予想できない。
   const delBox = h("div", { class: "insp-delete" });
-  const del = h("button", { class: "btn danger", type: "button" });
+  const del = h("button", { class: "btn danger", type: "button", "data-tour": "delete" });
   del.append(iconSpan("trash2", 14), "このノードを削除");
   del.addEventListener("click", () => {
     const orphans = (node.requires.concat(node.contains)).filter(
@@ -396,7 +397,7 @@ export function renderInspector(
       );
     }
     const row = h("div", { class: "insp-row", style: "margin:8px 0 0" });
-    const yes = h("button", { class: "btn danger", type: "button" }, ["削除する"]);
+    const yes = h("button", { class: "btn danger", type: "button", "data-tour": "delete-confirm" }, ["削除する"]);
     yes.addEventListener("click", () => cb.onDelete(selectedId));
     const no = h("button", { class: "btn", type: "button" }, ["やめる"]);
     no.addEventListener("click", () => {

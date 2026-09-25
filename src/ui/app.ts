@@ -20,6 +20,7 @@ import {
 import type { SirubeFs } from "../store/fs.ts";
 import { canUndoStructure, MarkdownGraphStore, type StructureUndo } from "../store/store.ts";
 import { clear, el, h, iconSpan, stateDot, toast } from "./dom.ts";
+import { createTutorial, readTourDone, type Tutorial } from "./tutorial.ts";
 import { hideFlyout } from "./flyout.ts";
 import { closeContextMenu, openContextMenu, type MenuItem, type MenuTarget } from "./context-menu.ts";
 import { renderGraph } from "./graph-view.ts";
@@ -1286,7 +1287,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     clear(modal);
     const tabs = h("div", { class: "modal-tabs" });
     const tab = (k: "requires" | "contains", label: string): HTMLButtonElement => {
-      const b = h("button", { class: `modal-tab${k === kind ? " on" : ""}`, type: "button" }, [label]);
+      const b = h("button", { class: `modal-tab${k === kind ? " on" : ""}`, type: "button", "data-tour": `tab-${k}` }, [label]);
       b.addEventListener("click", () => openBulkAdd(targetId, k, ta.value));
       return b;
     };
@@ -1905,6 +1906,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    *  選択を動かす経路は7つある（選ぶ・潜る・戻る・入口から開く・一覧・地図・復元）
    *  ので、経路ごとに書くと必ずどれかが漏れる。 */
   let lastSelected: string | undefined = state.selectedId;
+  /** 初回起動のチュートリアル。描き直しの終点で進み具合を見る（`tutorial.ts`）。 */
+  let tutorial: Tutorial | undefined;
 
   const render = (): void => {
     // 描き直しはすべての操作の終点なので、場所の保存もここに1つ置けば足りる。
@@ -1960,10 +1963,38 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         render();
       },
     }, state.insp);
+    tutorial?.update();
   };
 
   render();
   syncMocs(); // 起動時に1回。前回の終了後に手で書き換えられていても追いつく。
+
+  tutorial = createTutorial(
+    {
+      graph: () => state.graph,
+      cyclic: () => state.cycles.cyclic,
+      selectedId: () => state.selectedId,
+      // 片付けの「まとめて削除」。1件ずつの削除と違って戻す控えは作らない——
+      // 確認のうえで押されたものなので、ここで戻せる必要は無い。手前で自分で
+      // 消した1件の控えも捨てる（残すと、消えた相手を指したノードが戻ってくる）。
+      deleteNodes: async (ids) => {
+        for (const id of ids) {
+          if (state.graph.nodes[id]) await store.deleteNode(state.graph, id);
+        }
+        lastUndo = undefined;
+        if (state.focusId && !state.graph.nodes[state.focusId]) state.focusId = undefined;
+        if (state.selectedId && !state.graph.nodes[state.selectedId]) state.selectedId = undefined;
+        state.trail = state.trail.filter((t) => state.graph.nodes[t]);
+        recompute();
+        if (!state.focusId) state.mode = "list";
+        render();
+      },
+    },
+    (message) => toast(message),
+  );
+  el<HTMLButtonElement>("tour-btn").addEventListener("click", () => tutorial?.start());
+  // 空の vault を開いたときだけ自動で始める。既にデータがある人には出さない。
+  if (Object.keys(state.graph.nodes).length === 0 && !readTourDone()) tutorial.start();
 
   return {
     async reload() {

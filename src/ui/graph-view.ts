@@ -411,6 +411,8 @@ export function renderGraph(
       `graph-node st-${b.state}${b.kind === "focus" ? " focused" : ""}${b.id === selectedId ? " selected" : ""}`,
     );
     g.setAttribute("transform", `translate(${b.x}, ${b.y})`);
+    // チュートリアルが「このノードを選ぶ」を指すための札（`tutorial.ts`）。
+    g.setAttribute("data-node-id", b.id);
 
     // ノード全体のツールチップは最初の子に置く。弧や合流の数にも `<title>` が
     // 付いているので、後ろに回すと SVG も `querySelector` もそちらを先に拾う。

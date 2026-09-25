@@ -1324,3 +1324,57 @@ body.no-inspector #inspector-resizer {
   font-weight: 600;
   border-bottom-color: var(--st-actionable);
 }
+
+/* ---- 初回起動のチュートリアル（tutorial.ts） ----
+ * 案内は左下に1枚。トースト（下中央）とも右のインスペクタとも重ならない場所。
+ * モーダル（z-index 50）の上に出す——「分解する」を開いている間も、何を書けば
+ * いいかが読めている必要がある。 */
+.tour-card {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 70;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--st-actionable);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.tour-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.tour-title { font-weight: 600; color: var(--st-actionable); }
+.tour-count { font-size: 12px; color: var(--fg-muted); }
+.tour-body { margin: 0 0 10px; }
+.tour-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* 今押す場所。枠で囲うだけにして、形や配置は変えない（押す場所そのものを
+ * 覚えてほしいので、チュートリアルの間だけ違う見た目になると意味が無い）。 */
+.tour-target {
+  outline: 2px solid var(--st-actionable);
+  outline-offset: 2px;
+  border-radius: 6px;
+  animation: tour-pulse 1.6s ease-in-out infinite;
+}
+/* SVG の <g> には outline が描かれないので、グラフのノードは印の線で示す。 */
+.graph-node.tour-target { outline: none; animation: none; }
+.graph-node.tour-target .mark {
+  stroke: var(--st-actionable);
+  stroke-width: 4;
+  animation: tour-pulse 1.6s ease-in-out infinite;
+}
+@keyframes tour-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-target, .graph-node.tour-target .mark { animation: none; }
+}

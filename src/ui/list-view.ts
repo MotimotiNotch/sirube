@@ -112,7 +112,7 @@ export function renderList(
     const node = graph.nodes[hit.id];
     if (!node) continue;
 
-    const card = h("div", { class: recent ? "hit recent" : "hit" });
+    const card = h("div", { class: recent ? "hit recent" : "hit", "data-node-id": node.id });
 
     // 付箋は行の左の縁に。**俯瞰では出さない**——全行が同じ目的の下にいるので
     // 全行で同じ色になる（規則2）。パンくずを消しているのと同じ理由。
