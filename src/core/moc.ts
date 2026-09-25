@@ -162,9 +162,9 @@ function stuckReason(g: Graph, rootId: string, cycles: CycleInfo): string {
   if (onCycle.length > 0) {
     const involved = cycles.cycles
       .filter((cycle) => cycle.some((id) => onCycle.includes(id)))
-      .map((cycle) => cycle.map((id) => nodeLink(g, id)).join(" ⟷ "))
-      .join("、");
-    return `輪で詰まっています（${involved}）。1つの名前に2つのものが混ざっているサインなので、割ると要求の向きが揃ってほどけます。`;
+      .map((cycle) => cycle.map((id) => nodeLink(g, id)).join("・"))
+      .join("／");
+    return `待ち合って一周しています（${involved}）。1つの名前に2つのものが混ざっているサインなので、割ると要求の向きが揃ってほどけます。`;
   }
   if (members.length > 0 && members.every((id) => g.nodes[id]?.satisfied)) {
     return "必要なものは全部揃っています。この目的そのものを達成にできます。";
@@ -248,7 +248,7 @@ function renderIndex(
   // 地図から消えると、詰まっているものほど見えなくなる。
   const stranded = layer.ids.filter((id) => !seen.has(id));
   if (stranded.length > 0) {
-    out.push("", "どの根からも辿り着けないゴール（輪の中にいます）:", "");
+    out.push("", "どの根からも辿り着けないゴール（待ち合いの中にいます）:", "");
     for (const id of stranded) walk(id, 0, 0);
   }
   out.push("");
@@ -270,7 +270,7 @@ function renderIndex(
 
   if (cycles.cycles.length > 0) {
     out.push("## 割れているもの", "");
-    out.push("輪になっている＝1つの名前に2つのものが混ざっているサインです。割ると要求の向きが揃ってほどけます。", "");
+    out.push("待ち合って一周している＝1つの名前に2つのものが混ざっているサインです。割ると要求の向きが揃ってほどけます。", "");
     for (const cycle of cycles.cycles) out.push(`- ${cycle.map((x) => nodeLink(g, x)).join(" ⟷ ")}`);
     out.push("");
   }

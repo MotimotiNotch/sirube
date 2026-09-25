@@ -35,7 +35,7 @@ export const STATE_LABEL: Record<NodeState, string> = {
   SATISFIED: "達成済み",
   ACTIONABLE: "今やれる",
   BLOCKED: "前提待ち",
-  CYCLIC: "輪で詰まっている",
+  CYCLIC: "待ち合って一周している",
 };
 
 export const STATE_ICON: Record<NodeState, IconName> = {

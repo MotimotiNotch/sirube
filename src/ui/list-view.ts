@@ -94,7 +94,7 @@ export function renderList(
       : recent
         ? "まだ書き換わったノードがありません。"
         : result.cycles.length > 0
-        ? "今やれることがありません。上の輪をほどくと動き出します。"
+        ? "今やれることがありません。上の待ち合いをほどくと動き出します。"
         : "今やれることがありません。";
     container.append(h("div", { class: "empty" }, [msg]));
     return;
@@ -235,7 +235,7 @@ function cycleNotice(graph: Graph, cycle: string[], cb: ListCallbacks): HTMLElem
 
   const head = h("div", { class: "cycle-head" });
   const title = h("h3");
-  title.append(iconSpan("repeat", 14), "この輪の中に、2つに分かれるノードがあるかもしれません");
+  title.append(iconSpan("repeat", 14), "この待ち合いの中に、2つに分かれるノードがあるかもしれません");
   head.append(title);
 
   const ring = h("div", { class: "cycle-ring" });
@@ -255,10 +255,10 @@ function cycleNotice(graph: Graph, cycle: string[], cb: ListCallbacks): HTMLElem
   row.append(ring, act);
 
   const why = h("details", { class: "cycle-why" });
-  why.append(h("summary", {}, ["なぜ輪ができるのか"]));
+  why.append(h("summary", {}, ["なぜ待ち合って一周するのか"]));
   why.append(
     h("p", {}, [
-      "輪ができるのは、1つの名前に2つの違うものが混ざっているサインです。どれかを割ると要求の向きが揃ってほどけます。",
+      "待ち合って一周するのは、1つの名前に2つの違うものが混ざっているサインです。どれかを割ると要求の向きが揃ってほどけます。",
     ]),
   );
 

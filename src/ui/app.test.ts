@@ -435,7 +435,7 @@ describe("ドリルダウンとインスペクタ", () => {
     const chip = Array.from($("center-body").querySelectorAll("button")).find((b) => b.textContent === "実績を作る");
     (chip as HTMLButtonElement).click();
     await tick();
-    expect(text("inspector")).toContain("輪の上にいます");
+    expect(text("inspector")).toContain("待ち合って一周しています");
     expect(text("inspector")).toContain("2つに割る");
   });
 });
@@ -1750,7 +1750,7 @@ describe("凡例", () => {
   test("4状態・線種2つ・弧・合流を説明する", () => {
     legendBtn().click();
     const body = panel().textContent ?? "";
-    for (const label of ["今やれる", "前提待ち", "達成済み", "輪で詰まっている"]) {
+    for (const label of ["今やれる", "前提待ち", "達成済み", "待ち合って一周している"]) {
       expect(body).toContain(label);
     }
     expect(body).toContain("これが必要（前提）");

@@ -1585,12 +1585,12 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       for (const u of plan.unresolved) {
         const li = h("li");
         if (u.kind === "cycle") {
-          li.append(h("span", { class: "plan-kind" }, ["輪"]), `${u.nodes.map(nameOf).join(" → ")} → …（分解が要る）`);
+          li.append(h("span", { class: "plan-kind" }, ["待ち合い"]), `${u.nodes.map(nameOf).join("・")}（分解が要る）`);
         } else if (u.kind === "near-duplicate") {
           li.append(h("span", { class: "plan-kind" }, ["表記ゆれ"]), u.ids.map(nameOf).join(" / "));
         } else if (u.kind === "contains-cycle") {
           li.append(
-            h("span", { class: "plan-kind" }, ["内包の輪"]),
+            h("span", { class: "plan-kind" }, ["内包の待ち合い"]),
             `${u.nodes.map(nameOf).join(" → ")} → …（割るのではなく、どれかの「これで構成」を外す）`,
           );
         } else if (u.kind === "oscillating") {

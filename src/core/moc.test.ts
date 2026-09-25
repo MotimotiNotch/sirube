@@ -105,8 +105,8 @@ describe("MOC 3層の生成", () => {
   test("今やれることが無いとき、理由が必ず出る（輪）", () => {
     const graph = g("ポートフォリオを公開する -> 実績を作る -> 案件を取る -> 実績を作る");
     const docs = render(graph);
-    expect(doc(docs, INDEX_DOC)).toContain("輪で詰まっています");
-    expect(doc(docs, `${GOALS_DIR}/ポートフォリオを公開する.md`)).toContain("輪で詰まっています");
+    expect(doc(docs, INDEX_DOC)).toContain("待ち合って一周しています");
+    expect(doc(docs, `${GOALS_DIR}/ポートフォリオを公開する.md`)).toContain("待ち合って一周しています");
   });
 
   test("今やれることが無いとき、理由が必ず出る（全部揃っている）", () => {

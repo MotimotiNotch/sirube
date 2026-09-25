@@ -154,11 +154,11 @@ export function renderInspector(
   if (state === "CYCLIC") {
     const warn = h("div", { class: "cycle-notice" });
     const t = h("h3");
-    t.append(iconSpan("repeat", 14), "輪の上にいます");
+    t.append(iconSpan("repeat", 14), "待ち合って一周しています");
     warn.append(t);
     warn.append(
       h("p", {}, [
-        "このノードを2つに割ると輪がほどけることがあります（例:「案件を取る」→「小さい案件」「大きい案件」）。割った先は「分解する」から足せます。",
+        "このノードを2つに割ると待ち合いがほどけることがあります（例:「案件を取る」→「小さい案件」「大きい案件」）。割った先は「分解する」から足せます。",
       ]),
     );
     container.append(warn);
