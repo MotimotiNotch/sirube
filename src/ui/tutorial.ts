@@ -45,6 +45,102 @@ const NUMBERED: Step[] = ["goal", "requires", "contains", "achieve", "delete"];
 
 const TARGET_CLASS = "tour-target";
 
+// ---- 暗くする幕と、案内カードの置き場所（2026-09-25、のっち要望） ----
+//
+// 押す場所以外を暗くし、**暗いところは押せなくする**（のっち決定）。幕は1枚の
+// 固定要素で、押す場所の形に clip-path で穴を開ける。穴の部分は幕が無いのと同じ
+// なので、下のボタンがそのまま押せる。押す場所の要素に影を付けて周りを塗る方法は
+// 取らない——グラフのノードは SVG の <g> で影が描けず、スクロールする枠の中では
+// 影が枠で切れる。
+//
+// モーダルが開いている間は幕を出さない。モーダルは自分の背景で既に暗く、押せなく
+// なっているので、重ねると二重に暗くなるうえ、書く欄（前提・中身の名前）まで
+// 塞いでしまう。
+
+export interface Rect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** 穴の周りの余白と角の丸み。押す場所の枠（outline-offset 2px + 2px）が穴に収まる大きさ。 */
+const HOLE_PAD = 6;
+const HOLE_RADIUS = 8;
+/** カードと押す場所の間、カードと画面の端の間。 */
+const CARD_GAP = 12;
+const CARD_MARGIN = 8;
+
+const intersects = (a: Rect, b: Rect): boolean =>
+  a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+const pad = (r: Rect, p: number): Rect => ({ left: r.left - p, top: r.top - p, right: r.right + p, bottom: r.bottom + p });
+
+/** 画面と重なる部分があるか。幅や高さが0のもの（描かれていない要素）は見えていない扱い。 */
+export function visibleIn(r: Rect, vw: number, vh: number): boolean {
+  return r.right > r.left && r.bottom > r.top && intersects(r, { left: 0, top: 0, right: vw, bottom: vh });
+}
+
+/** 幕の clip-path。画面全体の矩形から、穴を evenodd でくり抜く。 */
+export function shadePath(holes: Rect[], vw: number, vh: number): string {
+  const n = (v: number): string => String(Math.round(v * 10) / 10);
+  let d = `M0 0H${n(vw)}V${n(vh)}H0Z`;
+  for (const h0 of holes) {
+    const h = pad(h0, HOLE_PAD);
+    const w = h.right - h.left;
+    const ht = h.bottom - h.top;
+    const r = Math.min(HOLE_RADIUS, w / 2, ht / 2);
+    d +=
+      `M${n(h.left + r)} ${n(h.top)}H${n(h.right - r)}A${n(r)} ${n(r)} 0 0 1 ${n(h.right)} ${n(h.top + r)}` +
+      `V${n(h.bottom - r)}A${n(r)} ${n(r)} 0 0 1 ${n(h.right - r)} ${n(h.bottom)}` +
+      `H${n(h.left + r)}A${n(r)} ${n(r)} 0 0 1 ${n(h.left)} ${n(h.bottom - r)}` +
+      `V${n(h.top + r)}A${n(r)} ${n(r)} 0 0 1 ${n(h.left + r)} ${n(h.top)}Z`;
+  }
+  return `path(evenodd, "${d}")`;
+}
+
+/**
+ * 案内カードの置き場所。押す場所の下 → 上 → 右 → 左の順に試し、画面に収まって
+ * `avoid`（押す場所と、書く欄を含むモーダル）のどれにも被らない最初の位置を返す。
+ * 押す場所の周りに置けなければ、avoid 全体の外側で同じ順に試す（モーダルの中の
+ * タブを押すときは、モーダルの横に出る）。どこにも置けなければ undefined——
+ * 呼び出し側は今までどおり左下に置く。
+ */
+export function placeCard(
+  anchors: Rect[],
+  avoid: Rect[],
+  size: { w: number; h: number },
+  vw: number,
+  vh: number,
+): { left: number; top: number } | undefined {
+  const { w, h } = size;
+  const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+  const fits = (left: number, top: number): boolean => {
+    if (left < CARD_MARGIN || top < CARD_MARGIN || left + w > vw - CARD_MARGIN || top + h > vh - CARD_MARGIN) return false;
+    const box = { left, top, right: left + w, bottom: top + h };
+    return !avoid.some((a) => intersects(box, pad(a, CARD_GAP / 2)));
+  };
+  for (const r of anchors) {
+    const x = clamp(r.left, CARD_MARGIN, vw - w - CARD_MARGIN);
+    const y = clamp(r.top, CARD_MARGIN, vh - h - CARD_MARGIN);
+    const candidates: Array<[number, number]> = [
+      [x, r.bottom + CARD_GAP],
+      [x, r.top - CARD_GAP - h],
+      [r.right + CARD_GAP, y],
+      [r.left - CARD_GAP - w, y],
+    ];
+    for (const [left, top] of candidates) if (fits(left, top)) return { left, top };
+  }
+  return undefined;
+}
+
+const union = (rs: Rect[]): Rect => ({
+  left: Math.min(...rs.map((r) => r.left)),
+  top: Math.min(...rs.map((r) => r.top)),
+  right: Math.max(...rs.map((r) => r.right)),
+  bottom: Math.max(...rs.map((r) => r.bottom)),
+});
+
 export function readTourDone(): boolean {
   try {
     return localStorage.getItem(TOUR_DONE_KEY) === "1";
@@ -86,12 +182,18 @@ export function createTutorial(deps: TutorialDeps, onFinish: (message: string) =
     for (const el of Array.from(document.querySelectorAll(`.${TARGET_CLASS}`))) el.classList.remove(TARGET_CLASS);
   };
 
+  let shade: HTMLElement | undefined;
+  let lastTarget: Element | null = null;
+
   const finish = (message: string): void => {
     step = undefined;
     markTourDone();
     clearTarget();
     card?.remove();
     card = undefined;
+    shade?.remove();
+    shade = undefined;
+    lastTarget = null;
     onFinish(message);
   };
 
@@ -267,13 +369,97 @@ export function createTutorial(deps: TutorialDeps, onFinish: (message: string) =
     card.replaceChildren(head, h("p", { class: "tour-body" }, [body()]), actions);
   };
 
+  /**
+   * 幕の穴とカードの位置を、今の画面に合わせて置き直す。
+   *
+   * 幕を出すのは「モーダルが閉じていて、押す場所が画面に見えている」ときと、
+   * 押す場所の無い片付けのとき（カードのボタンだけが押せればよい）。押す場所が
+   * 見つからない・画面の外にあるときは幕を出さない——グラフのノードがパンで
+   * 画面外に出ていると、幕で塞いだままでは戻す手段が無くなる。
+   */
+  const layout = (): void => {
+    if (!step || !card) return;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const t = document.querySelector(`.${TARGET_CLASS}`);
+    const tr = t?.getBoundingClientRect();
+    const tRect: Rect | undefined = tr && visibleIn(tr, vw, vh) ? tr : undefined;
+    const open = modalOpen();
+
+    // 押す場所の他に開けておく所。削除の手順の案内で「ヘッダーの『戻す』で戻せます」
+    // と書いているので、消した直後は「戻す」も押せるようにしておく。
+    const extra: Rect[] = [];
+    if (step === "delete" || step === "cleanup") {
+      const undo = document.getElementById("undo-btn");
+      const ur = undo && !undo.classList.contains("hidden") ? undo.getBoundingClientRect() : undefined;
+      if (ur && visibleIn(ur, vw, vh)) extra.push(ur);
+    }
+
+    const wantShade = !open && (tRect !== undefined || step === "cleanup");
+    if (wantShade) {
+      if (!shade) {
+        shade = h("div", { class: "tour-shade", "aria-hidden": "true" });
+        document.body.append(shade);
+      }
+      const clip = shadePath(tRect ? [tRect, ...extra] : extra, vw, vh);
+      if (shade.style.clipPath !== clip) shade.style.clipPath = clip;
+    } else if (shade) {
+      shade.remove();
+      shade = undefined;
+    }
+
+    // カードは押す場所の近く。モーダルの中を押すときは、書く欄を塞がないように
+    // モーダルごと避ける。
+    // 押す場所が無くてもモーダルが開いていれば（目的の名前を書いている最中など）、
+    // 書いている所の隣に置く。
+    const modalEl = open ? document.getElementById("modal") : null;
+    const mr0 = modalEl?.getBoundingClientRect();
+    const mr: Rect | undefined = mr0 && visibleIn(mr0, vw, vh) ? mr0 : undefined;
+    const avoid: Rect[] = [tRect, mr].filter((r): r is Rect => r !== undefined);
+    let pos: { left: number; top: number } | undefined;
+    if (avoid.length > 0) {
+      const anchors = avoid.length > 1 ? [avoid[0]!, union(avoid)] : avoid;
+      pos = placeCard(anchors, avoid, { w: card.offsetWidth, h: card.offsetHeight }, vw, vh);
+    }
+    card.classList.toggle("placed", pos !== undefined);
+    const left = pos ? `${Math.round(pos.left)}px` : "";
+    const top = pos ? `${Math.round(pos.top)}px` : "";
+    if (card.style.left !== left) card.style.left = left;
+    if (card.style.top !== top) card.style.top = top;
+  };
+
+  // 画面は描き直し以外でも動く（モーダルの開閉のアニメーション、グラフの
+  // パン・ズーム、枠のスクロール、窓の大きさ）。出来事のたびに短い間だけ毎フレーム
+  // 置き直す。ずっと回し続けないのは、使っていないときに何もしないため。
+  let followUntil = 0;
+  let following = false;
+  const follow = (): void => {
+    followUntil = Date.now() + 600;
+    if (following || typeof requestAnimationFrame !== "function") return;
+    following = true;
+    const frame = (): void => {
+      layout();
+      if (step && Date.now() < followUntil) requestAnimationFrame(frame);
+      else following = false;
+    };
+    requestAnimationFrame(frame);
+  };
+
   const update = (): void => {
     if (!step) return;
     advance();
     if (!step) return;
     clearTarget();
-    target()?.classList.add(TARGET_CLASS);
+    const t = target();
+    t?.classList.add(TARGET_CLASS);
+    // 押す場所が変わったら、枠の中でスクロールして見える所へ出す（幕で塞いだ後は
+    // 自分ではスクロールできないため）。グラフのノードは出さない——グラフは変換で
+    // 動いていて、スクロールさせると別の所がずれる。見えなければ幕を出さないだけ。
+    if (t && t !== lastTarget && t instanceof HTMLElement) t.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    lastTarget = t;
     renderCard();
+    layout();
+    follow();
   };
 
   // 描き直しを通らずに画面が変わる操作がある（モーダルの開閉とタブ、削除の確認欄）。
@@ -286,6 +472,13 @@ export function createTutorial(deps: TutorialDeps, onFinish: (message: string) =
     const later = (): void => void setTimeout(() => update(), 0);
     document.addEventListener("click", later, true);
     document.addEventListener("keyup", later, true);
+    const move = (): void => {
+      if (step) follow();
+    };
+    window.addEventListener("resize", move);
+    document.addEventListener("scroll", move, true);
+    document.addEventListener("wheel", move, { capture: true, passive: true });
+    document.addEventListener("pointerup", move, true);
   };
 
   return {

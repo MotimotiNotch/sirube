@@ -1326,9 +1326,9 @@ body.no-inspector #inspector-resizer {
 }
 
 /* ---- 初回起動のチュートリアル（tutorial.ts） ----
- * 案内は左下に1枚。トースト（下中央）とも右のインスペクタとも重ならない場所。
- * モーダル（z-index 50）の上に出す——「分解する」を開いている間も、何を書けば
- * いいかが読めている必要がある。 */
+ * 案内は押す場所の近くに1枚（2026-09-25、のっち要望。置けないときと押す場所が
+ * 無い手順は左下）。モーダル（z-index 50）の上に出す——「分解する」を開いている
+ * 間も、何を書けばいいかが読めている必要がある。 */
 .tour-card {
   position: fixed;
   left: 16px;
@@ -1344,6 +1344,18 @@ body.no-inspector #inspector-resizer {
   color: var(--fg);
   font-size: 13px;
   line-height: 1.7;
+}
+/* 押す場所の近くに置けたとき（tutorial.ts の placeCard）。left/top は JS が入れる。 */
+.tour-card.placed { bottom: auto; }
+
+/* 押す場所以外を暗くする幕。穴は clip-path で開ける（tutorial.ts の shadePath）。
+ * 穴の外は押せない（のっち決定、2026-09-25）。モーダル（50）より上、トーストと
+ * 中身の一覧（60）より下——トーストは読めるままにする。 */
+.tour-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(0, 0, 0, 0.55);
 }
 .tour-head {
   display: flex;

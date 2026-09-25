@@ -10,7 +10,7 @@ ensureDom();
 const { startApp } = await import("./app.ts");
 const { sampleFs } = await import("../dev/sample.ts");
 const { MemoryFs } = await import("../store/fs.ts");
-const { TOUR_DONE_KEY } = await import("./tutorial.ts");
+const { TOUR_DONE_KEY, placeCard, shadePath, visibleIn } = await import("./tutorial.ts");
 
 const HTML = (await Bun.file("index.html").text())
   .replace(/[\s\S]*<body>/, "")
@@ -21,6 +21,7 @@ const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 const card = (): HTMLElement | null => document.querySelector(".tour-card");
 const cardText = (): string => card()?.textContent ?? "";
 const target = (): Element | null => document.querySelector(".tour-target");
+const shade = (): HTMLElement | null => document.querySelector(".tour-shade");
 const buttonIn = (root: Element | null, label: string): HTMLButtonElement | undefined =>
   Array.from(root?.querySelectorAll("button") ?? []).find((b) => (b.textContent ?? "").includes(label)) as
     | HTMLButtonElement
@@ -52,7 +53,7 @@ const decompose = async (tab: "requires" | "contains", lines: string): Promise<v
 beforeEach(() => {
   document.body.innerHTML = HTML;
   localStorage.clear();
-  document.querySelectorAll(".tour-card").forEach((c) => c.remove());
+  document.querySelectorAll(".tour-card, .tour-shade").forEach((c) => c.remove());
 });
 
 describe("チュートリアル", () => {
@@ -150,9 +151,12 @@ describe("チュートリアル", () => {
     buttonIn(card(), "スキップ")!.click();
     await tick();
     expect(cardText()).toContain("チュートリアルで作った 1 件");
+    // 片付けは押す場所が無いので、カードのボタン以外を全部暗くする
+    expect(shade()).not.toBeNull();
     buttonIn(card(), "残す")!.click();
     await tick();
     expect(card()).toBeNull();
+    expect(shade()).toBeNull();
     expect((await fs.listNodes()).length).toBe(1);
   });
 
@@ -162,5 +166,74 @@ describe("チュートリアル", () => {
     await tick();
     expect(card()).toBeNull();
     expect(localStorage.getItem(TOUR_DONE_KEY)).toBe("1");
+  });
+
+  test("押す場所が見えていれば幕を出して穴を開け、カードをその下に置く。モーダルが開いたら幕は外す", async () => {
+    const btn = document.getElementById("new-root-btn")!;
+    btn.getBoundingClientRect = () => ({ left: 20, top: 100, right: 44, bottom: 124, width: 24, height: 24, x: 20, y: 100 }) as DOMRect;
+    await startApp(new MemoryFs({}));
+    expect(target()?.id).toBe("new-root-btn");
+    expect(shade()).not.toBeNull();
+    expect(shade()!.style.clipPath).toContain("evenodd");
+    expect(card()!.classList.contains("placed")).toBe(true);
+    expect(card()!.style.top).toBe("136px"); // 押す場所の下端 124 + 間 12
+
+    btn.click();
+    await tick();
+    expect(document.getElementById("modal-backdrop")!.classList.contains("hidden")).toBe(false);
+    expect(shade()).toBeNull(); // モーダル自身が暗くしている。重ねると入力欄まで塞ぐ
+  });
+
+  test("押す場所が画面に見えていなければ幕を出さない（パンで外れたノードを戻せなくなるため）", async () => {
+    await startApp(new MemoryFs({})); // happy-dom では大きさ0 = 見えていない扱い
+    expect(target()?.id).toBe("new-root-btn");
+    expect(shade()).toBeNull();
+    expect(card()!.classList.contains("placed")).toBe(false); // 陰性: 左下のまま
+  });
+});
+
+describe("幕とカードの置き場所（計算だけ）", () => {
+  const r = (left: number, top: number, w: number, h: number) => ({ left, top, right: left + w, bottom: top + h });
+  const size = { w: 300, h: 120 };
+
+  test("押す場所の下に置く", () => {
+    expect(placeCard([r(100, 100, 40, 30)], [r(100, 100, 40, 30)], size, 1200, 800)).toEqual({ left: 100, top: 142 });
+  });
+
+  test("下に入らなければ上、上下とも無理なら右", () => {
+    expect(placeCard([r(100, 700, 40, 30)], [r(100, 700, 40, 30)], size, 1200, 800)).toEqual({ left: 100, top: 568 });
+    const tall = r(100, 20, 40, 760);
+    expect(placeCard([tall], [tall], size, 1200, 800)?.left).toBe(152);
+  });
+
+  test("画面の右端では左へ寄せる", () => {
+    const t = r(1150, 100, 40, 30);
+    expect(placeCard([t], [t], size, 1200, 800)).toEqual({ left: 1200 - 300 - 8, top: 142 });
+  });
+
+  test("モーダルの中を押すときは、モーダルに被らない所（横）へ出る", () => {
+    const tab = r(420, 200, 60, 28);
+    const modal = r(400, 180, 400, 400);
+    const pos = placeCard([tab, modal], [tab, modal], size, 1280, 800)!;
+    const box = r(pos.left, pos.top, size.w, size.h);
+    expect(box.right <= modal.left || box.left >= modal.right || box.bottom <= modal.top || box.top >= modal.bottom).toBe(true);
+  });
+
+  test("どこにも置けなければ undefined（呼び出し側は左下）", () => {
+    const all = r(0, 0, 400, 300);
+    expect(placeCard([all], [all], size, 400, 300)).toBeUndefined();
+  });
+
+  test("幕は画面全体から穴の数だけくり抜く", () => {
+    const p = shadePath([r(10, 10, 20, 20), r(100, 100, 30, 30)], 800, 600);
+    expect(p.startsWith('path(evenodd, "M0 0H800V600H0Z')).toBe(true);
+    expect(p.match(/Z/g)?.length).toBe(3);
+    expect(shadePath([], 800, 600)).toBe('path(evenodd, "M0 0H800V600H0Z")'); // 片付け: 全部暗い
+  });
+
+  test("大きさ0や画面外は見えていない扱い", () => {
+    expect(visibleIn(r(0, 0, 0, 0), 800, 600)).toBe(false);
+    expect(visibleIn(r(900, 10, 20, 20), 800, 600)).toBe(false);
+    expect(visibleIn(r(790, 10, 20, 20), 800, 600)).toBe(true); // 一部でも見えていれば出す
   });
 });
