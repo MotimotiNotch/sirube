@@ -67,13 +67,18 @@ export function stateDot(state: NodeState): HTMLSpanElement {
   return h("span", { class: `dot state-${state}`, title: STATE_LABEL[state] });
 }
 
-let toastTimer: ReturnType<typeof setTimeout> | undefined;
-export function toast(message: string): void {
+/**
+ * 下から出るお知らせ。**1つずつ自分のタイマーで消える。**
+ *
+ * 以前はタイマーを全部で1本だけ持ち、次のお知らせが出ると差し替えていた。
+ * 3.2秒以内に2つ出ると前のものを消す人がいなくなり、画面に残り続けた
+ * （2026-09-25、のっちが続けて削除して気づいた）。`ms` はテスト用。
+ */
+export function toast(message: string, ms = 3200): void {
   const stack = el("toast-stack");
   const node = h("div", { class: "toast" }, [message]);
   stack.append(node);
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.remove(), 3200);
+  setTimeout(() => node.remove(), ms);
 }
 
 export function clear(node: HTMLElement): void {
