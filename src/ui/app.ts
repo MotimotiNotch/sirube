@@ -799,6 +799,16 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    * 1手だけ（2026-09-14 までは戻せなかった）なので、インスペクタの「押してから
    * 確認が出る」形のままにしてある。マウスの1動作の近くに置くものではない。
    */
+  /**
+   * 外すと目的として一覧に湧くか。**最後の親から外し、`goal` を書いていない**ときだけ。
+   * `goal: false` なら湧かないし、`goal: true` なら既に地図にいるので何も変わらない。
+   * 削除は「◯件が目的として一覧に出る」と先に言うのに、外すは言っていなかった
+   * （2026-09-28。狙いにくい線の上にしか無かったので目立たなかった）。
+   */
+  const surfacesOnDetach = (childId: string): boolean =>
+    inDegree(childId, state.rev) === 1 && state.graph.nodes[childId]?.goal === undefined;
+  const SURFACE_NOTE = "（目的として一覧に出ます）";
+
   const openMenu = (target: MenuTarget, x: number, y: number): void => {
     hideFlyout();
     const items: MenuItem[] = [];
@@ -826,6 +836,27 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       if (state.layer === "goals") {
         items.push({ label: "グラフで開く", icon: "layers", onSelect: () => focusFresh(target.id) });
       }
+      // 外す（2026-09-28、のっち「ノードのメニューの方がいい」）。外したいと思って
+      // 右クリックするのはノードの方で、線の当たり判定（14px）は狙いにくい。
+      // **親が複数いるので「外す」1つにはできない**——親ごとに1行出し、今の焦点を
+      // 先頭に置く（グラフに線が見えている親）。地図では出さない。地図の線は間を
+      // 縮約したもので、どの親から外れるのかが画面と一致しない。
+      if (state.layer === "detail") {
+        const parents = [
+          ...(state.rev.requiredBy.get(target.id) ?? []),
+          ...(state.rev.containedBy.get(target.id) ?? []),
+        ];
+        const ordered = [...new Set(parents)].sort((a, b) => Number(b === state.focusId) - Number(a === state.focusId));
+        const note = surfacesOnDetach(target.id) ? SURFACE_NOTE : "";
+        for (const p of ordered) {
+          items.push({
+            label: `「${nameOf(p)}」から外す${note}`,
+            icon: "x",
+            danger: true,
+            onSelect: () => void detach(p, target.id),
+          });
+        }
+      }
     } else if (target.kind === "edge") {
       const parent = nameOf(target.parentId);
       const child = nameOf(target.childId);
@@ -835,7 +866,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         onSelect: () => openInsert(target.parentId, target.childId, target.edge),
       });
       items.push({
-        label: `「${parent}」から「${child}」を外す`,
+        label: `「${parent}」から「${child}」を外す${surfacesOnDetach(target.childId) ? SURFACE_NOTE : ""}`,
         icon: "x",
         danger: true,
         onSelect: () => void detach(target.parentId, target.childId),

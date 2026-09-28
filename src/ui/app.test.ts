@@ -2250,6 +2250,58 @@ describe("右クリックのメニュー", () => {
     expect(text("toast-stack")).toContain("外しました");
   });
 
+  describe("ノードのメニューから外す（2026-09-28）", () => {
+    const enter = async (label: string): Promise<void> => {
+      for (let i = 0; i < 2; i++) {
+        node(label).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await tick();
+      }
+    };
+
+    test("最後の親から外すときは、目的として出ることを先に言う", async () => {
+      await openGraph();
+      await rightClick(node("MVP実装完了"));
+      expect(menuLabels()).toContain("「Sirube をリリースする」から外す（目的として一覧に出ます）");
+      // 陽性対照: 外す前はサイドバーの目的にいない
+      expect(findButton("root-list", "MVP実装完了")).toBeFalsy();
+      menuItem("」から外す").click();
+      await tick();
+      await tick();
+      expect(text("toast-stack")).toContain("外しました");
+      expect(findButton("root-list", "MVP実装完了")).toBeTruthy();
+    });
+
+    test("親が複数いれば親ごとに1行出し、今の焦点を先頭に置く。予告は出さない", async () => {
+      // 新リポジトリを作る は4つのノードから requires されている
+      await openGraph();
+      await enter("MVP実装完了");
+      await enter("検索と横断ビュー");
+      await rightClick(node("新リポジトリを作る"));
+      const detach = menuLabels().filter((l) => l.includes("」から外す"));
+      expect(detach.length).toBe(4);
+      expect(detach[0]).toBe("「検索と横断ビュー」から外す");
+      expect(detach.some((l) => l.includes("目的として"))).toBe(false);
+    });
+
+    test("地図では出さない（線が縮約されていて、どの親から外れるのかが画面と合わない）", async () => {
+      await openGraph();
+      Array.from($("breadcrumb").querySelectorAll("button"))
+        .find((b) => b.textContent === "地図")!
+        .click();
+      await tick();
+      await rightClick(node("確定申告"));
+      expect(menuLabels().join(" ")).toContain("グラフで開く"); // メニュー自体は出ている
+      // 「地図から外す」は別の項目。親の名前の括弧込みで見る
+      expect(menuLabels().join(" ")).not.toContain("」から外す");
+    });
+  });
+
+  test("線のメニューも、最後の親なら目的として出ることを言う", async () => {
+    await openGraph();
+    await rightClick($("center-body").querySelector(".graph-edge-hit")!);
+    expect(menuLabels().join(" ")).toContain("（目的として一覧に出ます）");
+  });
+
   test("地の右クリックは作る系だけ", async () => {
     await openGraph();
     await rightClick($("center-body").querySelector(".graph-wrap")!);
