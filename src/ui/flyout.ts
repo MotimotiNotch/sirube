@@ -129,4 +129,25 @@ export function showOutlineFlyout(
 
   fly.onmouseenter = () => clearTimeout(hideTimer);
   fly.onmouseleave = scheduleHideFlyout;
+  fly.oncontextmenu = passContextMenuThrough;
+}
+
+/**
+ * 一覧の上の右クリックは、一覧を閉じて**真下にあるものへ渡す**（2026-09-28）。
+ *
+ * 一覧は拡大率に関わらず同じ大きさで出るので、縮小したグラフでは隣のノードを
+ * まるごと覆う。しかも上にポインタがある間は閉じない（上の `onmouseenter`）ので、
+ * 隠れたノードへ向かうと一覧を通って開いたままになり、右クリックが一覧に当たって
+ * 届かなかった（のっち報告）。一覧の上の右クリックには役割が無いので、渡しても
+ * 失うものが無い。左クリックは渡さない——行を押して飛ぶのがこの一覧の仕事。
+ */
+function passContextMenuThrough(ev: MouseEvent): void {
+  ev.preventDefault();
+  hideFlyout();
+  // 閉じた（display:none）後に引くので、一覧ではなくその下が返る。
+  const under = document.elementFromPoint(ev.clientX, ev.clientY);
+  if (!under) return;
+  under.dispatchEvent(
+    new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: ev.clientX, clientY: ev.clientY }),
+  );
 }
