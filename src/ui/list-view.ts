@@ -208,7 +208,7 @@ export function renderList(
       const from = hit.dueFrom ? graph.nodes[hit.dueFrom]?.name ?? hit.dueFrom : undefined;
       dueEl = h(
         "span",
-        { class: from ? "hit-indegree due-inherited" : "hit-indegree", title: from ? `「${from}」の期限から` : "期限" },
+        { class: from ? "hit-indegree due-inherited" : "hit-indegree", title: from ? `期限は「${from}」に間に合わせる` : "期限" },
         [hit.due],
       );
     }

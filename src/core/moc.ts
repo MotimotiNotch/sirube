@@ -180,7 +180,7 @@ function stuckReason(g: Graph, rootId: string, cycles: CycleInfo): string {
  *  1行ごとに全体を塗り直すが、生成は保存のたびに1回で、ノード数も数百に届かない。 */
 function dueSuffix(g: Graph, id: string): string {
   const eff = effectiveDues(g).get(id);
-  if (eff && eff.from !== id) return `（期限 ${eff.date}、${g.nodes[eff.from]?.name ?? eff.from} から）`;
+  if (eff && eff.from !== id) return `（期限 ${eff.date}、「${g.nodes[eff.from]?.name ?? eff.from}」に間に合わせる）`;
   const due = eff?.date ?? g.nodes[id]?.due;
   return due === undefined || due === "" ? "" : `（期限 ${due}）`;
 }

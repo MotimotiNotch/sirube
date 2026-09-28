@@ -105,13 +105,15 @@ export function renderInspector(
   row.append(stateBadge(state));
   // 期限は上から伝わったものも出す（`effectiveDues`）。どこから来たかは文字で言う
   // ——詳細パネルは読むための場所なので、ツールチップに隠さない。
+  // 「◯◯の期限から」は起点（その日から数える）にも読めたので、伝わる理由を言う
+  // 「◯◯に間に合わせる」にした（2026-09-28、のっち）。
   const due = effectiveDues(graph).get(selectedId);
   let dueFrom: HTMLElement | undefined;
   if (due && due.from !== selectedId) {
     const from = graph.nodes[due.from]?.name ?? due.from;
     const own = node.due && node.due !== due.date ? `。自分の期限は ${node.due}` : "";
     row.append(h("span", { class: "hit-indegree due-inherited" }, [`期限 ${due.date}`]));
-    dueFrom = h("div", { class: "insp-due-from" }, [`「${from}」の期限から${own}`]);
+    dueFrom = h("div", { class: "insp-due-from" }, [`「${from}」に間に合わせる${own}`]);
   } else if (due || node.due) {
     row.append(h("span", { class: "hit-indegree" }, [`期限 ${due?.date ?? node.due}`]));
   }

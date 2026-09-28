@@ -136,6 +136,15 @@ describe("MOC 3層の生成", () => {
     expect(actionable).toContain("（2 箇所から要求されている）");
   });
 
+  test("上から伝わった期限は「◯◯に間に合わせる」と出どころを添える", () => {
+    const graph = g("引っ越し -> 家");
+    graph.nodes["引っ越し"]!.due = "2027-03-31";
+    const goal = doc(render(graph), `${GOALS_DIR}/引っ越し.md`);
+    // 「◯◯ から」は起点（その日から数える）にも読めたのでやめた（2026-09-28）
+    expect(goal).toContain("[[家]]（期限 2027-03-31、「引っ越し」に間に合わせる）");
+    expect(goal).not.toContain("引っ越し から）");
+  });
+
   test("id と表示名が違うときだけエイリアス記法にする", () => {
     // 今は id ＝ 名前なので素のリンク。ULID へ分離したら自動でエイリアスに変わる。
     const graph = newGraph();

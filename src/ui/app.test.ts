@@ -2661,7 +2661,9 @@ describe("期限の伝播", () => {
     (row.querySelector(".hit-main") as HTMLButtonElement).click();
     await tick();
     expect(text("inspector")).toContain("期限 2027-03-15");
-    expect(text("inspector")).toContain("「確定申告」の期限から");
+    expect(text("inspector")).toContain("「確定申告」に間に合わせる");
+    // 「の期限から」は起点にも読めたのでやめた（2026-09-28）
+    expect(text("inspector")).not.toContain("の期限から");
   });
 
   test("自分で書いた期限は破線にしない", async () => {
@@ -2669,6 +2671,6 @@ describe("期限の伝播", () => {
     await tick();
     expect(text("inspector")).toContain("期限 2027-03-15");
     expect($("inspector").querySelector(".due-inherited")).toBeNull();
-    expect(text("inspector")).not.toContain("の期限から");
+    expect(text("inspector")).not.toContain("に間に合わせる");
   });
 });
