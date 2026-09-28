@@ -1323,6 +1323,37 @@ describe("まとめて追加（DSL）", () => {
   });
 });
 
+describe("パンくずの頭の「ここに足す」（2026-09-28）", () => {
+  const addBtn = (): HTMLButtonElement => $("breadcrumb").querySelector(".crumb-add") as HTMLButtonElement;
+  const graphNode = (label: string): Element =>
+    Array.from($("center-body").querySelectorAll("g.graph-node")).find((g) => (g.textContent ?? "").includes(label))!;
+
+  test("焦点ではなく、今選んでいるノードに足す", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    expect(addBtn().title).toContain("「Sirube をリリースする」に足す");
+
+    // 1回押すと選ぶだけ（潜らない）。足す先はそちらへ移る
+    graphNode("MVP実装完了").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    expect(text("breadcrumb")).not.toContain("MVP実装完了"); // 焦点は動いていない
+    expect(addBtn().title).toContain("「MVP実装完了」に足す");
+
+    addBtn().click();
+    await tick();
+    expect(text("modal")).toContain("「MVP実装完了」には何が必要？");
+  });
+
+  test("何も選んでいなければ「まとめて書く」を開く", async () => {
+    // 起動直後の「今やれること」。選んでいるものが無い
+    expect(addBtn()).not.toBeNull();
+    expect(addBtn().title).toContain("まとめて書く");
+    addBtn().click();
+    await tick();
+    expect($("modal").querySelector(".modal-tab.on")?.textContent).toBe("まとめて書く");
+  });
+});
+
 describe("前提の一括追加", () => {
   test("改行リストから複数の前提が作られ、グラフに反映される", async () => {
     findButton("root-list", "確定申告")!.click();

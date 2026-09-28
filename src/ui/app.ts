@@ -1805,6 +1805,22 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     const bar = el("breadcrumb");
     clear(bar);
 
+    // 行の頭の `+`（2026-09-28、のっち）。**今選んでいるノードに足す**——焦点ではなく
+    // 選択なので、A のグラフで B を1回押してから押せば B に足せる。「分解する」を開く
+    // ので、既にある名前を書けばそのノードに繋がる（既存同士を繋ぐ入口が見えなかった、
+    // #119）。何も選んでいなければ「まとめて書く」——`A -> C` でどの組でも書ける。
+    // サイドバーの `+` は「新しい目的」、こちらは「ここに足す」で、場所で意味を分ける。
+    {
+      const target = state.selectedId && state.graph.nodes[state.selectedId] ? state.selectedId : undefined;
+      const title = target
+        ? `「${nameOf(target)}」に足す（既にある名前を書けば繋がる）`
+        : "まとめて書く（既にある名前を書けば繋がる）";
+      const add = h("button", { class: "crumb-add", type: "button", title, "aria-label": title });
+      add.append(iconSpan("plus", 14));
+      add.addEventListener("click", () => (target ? openBulkAdd(target) : openAdd("bulk")));
+      bar.append(add);
+    }
+
     /** 一覧とグラフを行き来する切り替え。パンくずの右端に置く。
      *
      * 同じ場所で往復するので、押した後に別の場所へ戻る形にはしない。

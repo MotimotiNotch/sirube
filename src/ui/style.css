@@ -322,6 +322,20 @@ body.resizing { cursor: col-resize; user-select: none; }
   border-color: var(--fg-faint);
   color: var(--fg);
 }
+/* 行の頭の「ここに足す」。場所を言うパンくずの前に、区切って置く。 */
+.breadcrumb .crumb-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-right: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+.breadcrumb .crumb-add:hover { background: var(--bg-panel); border-color: var(--fg-faint); }
 .breadcrumb .sep { color: var(--fg-faint); display: flex; }
 .breadcrumb .current { color: var(--fg); font-weight: 600; }
 
