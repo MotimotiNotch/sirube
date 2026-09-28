@@ -5,11 +5,13 @@
 // 決めておいた分がここで効く。
 
 import { invoke } from "@tauri-apps/api/core";
+import { getAllWebviewWindows, WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open } from "@tauri-apps/plugin-dialog";
 import { BaseDirectory, writeTextFile } from "@tauri-apps/plugin-fs";
-import { startApp } from "../ui/app.ts";
+import { startApp, type AppOptions, type WindowTarget } from "../ui/app.ts";
 import { toast } from "../ui/dom.ts";
 import { TauriFs } from "../store/tauri-fs.ts";
+import { buildWindowQuery, parseWindowQuery } from "../ui/window-query.ts";
 
 const VAULT_KEY = "sirube.vaultPath";
 /** 今どの vault を開いているかを、**アプリの外から読める場所**に置くファイル。
@@ -59,7 +61,40 @@ async function resolveVault(): Promise<string | undefined> {
  * キャンセルされたときは何もしない——保存済みのパスも書き換えない。 */
 async function switchVault(): Promise<void> {
   const picked = await pickVault("開くフォルダを選んでください");
-  if (picked) location.reload();
+  if (!picked) return;
+  // サブ窓は開いたときの vault を指し続けるので、残すと別のフォルダの窓が並ぶ。
+  await closeSubWindows();
+  location.reload();
+}
+
+/** 本窓（Tauri の既定の窓）の名札。これ以外はサブ窓。 */
+const MAIN_LABEL = "main";
+
+async function closeSubWindows(): Promise<void> {
+  for (const w of await getAllWebviewWindows()) {
+    if (w.label !== MAIN_LABEL) await w.destroy().catch(() => {});
+  }
+}
+
+/** 窓の名札の通し番号。同じミリ秒に2回押されても名札がぶつからないように。 */
+let windowSeq = 0;
+
+/** 別窓を開く（2026-09-28）。中身は同じアプリで、起動引数だけが違う
+ *  （`window-query.ts`）。名札は capabilities の `sub-*` に合わせる——
+ *  合わない名札の窓は、ファイルの読み書きの権限を持たずに開く。 */
+function openWindow(target: WindowTarget, vault: string): void {
+  const label = `sub-${Date.now().toString(36)}-${windowSeq++}`;
+  const w = new WebviewWindow(label, {
+    url: `index.html${buildWindowQuery(target, vault)}`,
+    title: "Sirube",
+    width: 1100,
+    height: 760,
+    minWidth: 900,
+    minHeight: 560,
+  });
+  void w.once("tauri://error", (e) => {
+    toast(`別窓を開けませんでした（${String(e.payload)}）`);
+  });
 }
 
 function showFatal(message: string): void {
@@ -70,8 +105,12 @@ function showFatal(message: string): void {
   document.body.append(box);
 }
 
-const vault = await resolveVault();
-if (vault) void publishVaultPointer(vault);
+const query = parseWindowQuery(location.search);
+// サブ窓は本窓から vault を受け取る。localStorage からは読まない——本窓が後で
+// 切り替えても、この窓は開いたときのフォルダのまま（切り替えたら本窓が閉じる）。
+// 掲示板も本窓だけが書く。
+const vault = query.sub ? query.vault : await resolveVault();
+if (vault && !query.sub) void publishVaultPointer(vault);
 if (!vault) {
   showFatal("フォルダが選ばれなかったため起動できませんでした。ウィンドウを閉じてもう一度開いてください。");
 } else {
@@ -84,7 +123,11 @@ if (!vault) {
 
     const fs = new TauriFs(vault);
     await fs.ensureLayout();
-    const app = await startApp(fs, { vault: { path: vault, switchVault } });
+    const options: AppOptions = query.sub
+      ? { vault: { path: vault }, sub: query.initial ? { initial: query.initial } : {} }
+      : { vault: { path: vault, switchVault } };
+    options.openWindow = (target) => openWindow(target, vault);
+    const app = await startApp(fs, options);
 
     // 外部からの変更（エディタ・Obsidian・エージェント・git のマージ）を拾って
     // 読み直す。デバウンス付きなので git checkout のような一斉変更でも

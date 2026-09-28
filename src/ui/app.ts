@@ -152,18 +152,40 @@ function basename(p: string): string {
 export interface VaultInfo {
   /** 今開いているフォルダの絶対パス。 */
   path: string;
-  /** 別のフォルダを開き直す。実行すると画面ごと作り直される想定。 */
-  switchVault(): Promise<void>;
+  /** 別のフォルダを開き直す。実行すると画面ごと作り直される想定。
+   *  **サブ窓は渡さない**——切り替えは本窓だけの仕事（`AppOptions.sub`）。 */
+  switchVault?(): Promise<void>;
 }
+
+/** 別窓で最初に出すもの。 */
+export type WindowTarget = { kind: "node"; id: string } | { kind: "manual" };
 
 export interface AppOptions {
   /** vault という概念があるシェル（Tauri）だけが渡す。dev サーバ版は
    *  フォルダが固定なので渡さず、ヘッダーのボタンも出ない。 */
   vault?: VaultInfo;
+  /** 別窓を開く口（2026-09-28、のっち「マニュアルを見ながら操作」「ノードで複数
+   *  見比べる」）。渡したシェルだけ、ノードの右クリックとマニュアルに「別窓で開く」
+   *  が出る。**タブではなく窓**にしたのは、見比べるには2つが同時に画面に出ている
+   *  必要があるため（タブは切り替えなので並ばない）。 */
+  openWindow?: (target: WindowTarget) => void;
+  /**
+   * サブ窓として起動する。**サブ窓は localStorage に何も書かない。**
+   *
+   * localStorage は同じアプリの窓どうしで共有される。前回の場所・列の幅・
+   * チュートリアル済みを窓ごとに書くと、最後に動かした窓が本窓の分を上書きし、
+   * 次に開いたとき本窓がサブ窓の続きから始まる。保存するのは本窓だけにして、
+   * サブ窓はその場限りの窓として扱う（読むのは構わない——列の幅は本窓に揃う）。
+   *
+   * 書き込みはどの窓からでもできる（のっち選択）。窓どうしの食い違いは、
+   * 外でファイルが書き換わったときの仕組み（監視・下見の出し直し・「戻す」の
+   * 検査）がそのまま受け止める——他の窓の書き込みは、この窓からは「外」に見える。
+   */
+  sub?: { initial?: WindowTarget };
 }
 
-/** 前回開いていた場所の保存先。vault ごとには分けない——アプリは1つの vault を
- *  指すので、同時に2つ開く経路が無い。 */
+/** 前回開いていた場所の保存先。vault ごとには分けない——窓が複数あっても開く
+ *  vault は1つで、書くのは本窓だけ（`AppOptions.sub`）。 */
 const PLACE_KEY = "sirube.place";
 
 /** 保存するのは「どこを見ていたか」だけ。**検索語は入れない**——開いた瞬間に
@@ -283,7 +305,24 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     plan: planReconcile(graph),
   };
 
-  restorePlace(state);
+  /** 本窓か。設定（場所・列の幅・チュートリアル済み）を保存するのは本窓だけ（`AppOptions.sub`）。 */
+  const persistent = options.sub === undefined;
+  if (persistent) {
+    restorePlace(state);
+  } else {
+    // サブ窓は前回の場所を持たない。開いたときに頼まれたものを出す。
+    const initial = options.sub?.initial;
+    if (initial?.kind === "manual") {
+      state.mode = "manual";
+    } else if (initial?.kind === "node" && state.graph.nodes[initial.id]) {
+      // `focusFresh` と同じ置き方。描く前なので render はここで呼ばない。
+      state.trail = pathFromRoot(state.graph, state.rev, initial.id);
+      state.focusId = initial.id;
+      state.selectedId = initial.id;
+      state.mode = "graph";
+    }
+    // 指していたノードが開くまでに消えていたら、黙って「今やれること」から始める。
+  }
 
   if (issues.length > 0) {
     toast(`${issues.length} 件のファイルに読み取り上の問題があります`);
@@ -830,6 +869,10 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         onSelect: () => void toggle(target.id),
       });
       items.push({ label: "分解する", icon: "plus", onSelect: () => openBulkAdd(target.id) });
+      const openWindow = options.openWindow;
+      if (openWindow) {
+        items.push({ label: "別窓で開く", icon: "appWindow", onSelect: () => openWindow({ kind: "node", id: target.id }) });
+      }
       const on = isGoal(state.graph, target.id, state.rev);
       items.push({
         label: on ? "地図から外す" : "地図に出す",
@@ -1004,7 +1047,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       document.documentElement.style.setProperty(o.cssVar, `${w}px`);
       rail.classList.toggle("collapsed", w === 0);
       document.body.classList.toggle(o.hideClass, w === 0);
-      if (persist) localStorage.setItem(o.storageKey, String(w));
+      if (persist && persistent) localStorage.setItem(o.storageKey, String(w));
     };
 
     const saved = Number(localStorage.getItem(o.storageKey));
@@ -1036,7 +1079,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       dragging = false;
       rail.classList.remove("dragging");
       document.body.classList.remove("resizing");
-      localStorage.setItem(o.storageKey, String(paneWidth(o.cssVar, o.defaultW)));
+      if (persistent) localStorage.setItem(o.storageKey, String(paneWidth(o.cssVar, o.defaultW)));
       // 折り返し位置は描画時のペイン幅で決まるので、離した時点で引き直す。
       if (state.mode === "graph") renderCenter();
     };
@@ -1110,10 +1153,17 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     const actions = h("div", { class: "modal-actions" });
     const cancel = h("button", { class: "btn", type: "button" }, ["閉じる"]);
     cancel.addEventListener("click", closeModal);
-    const swap = h("button", { class: "btn", type: "button" });
-    swap.append(iconSpan("folderOpen", 14), "別のフォルダを開く");
-    swap.addEventListener("click", () => void info.switchVault());
-    actions.append(cancel, swap);
+    actions.append(cancel);
+    const switchVault = info.switchVault;
+    if (switchVault) {
+      const swap = h("button", { class: "btn", type: "button" });
+      swap.append(iconSpan("folderOpen", 14), "別のフォルダを開く");
+      swap.addEventListener("click", () => void switchVault());
+      actions.append(swap);
+    } else {
+      // サブ窓。切り替えると本窓と別のフォルダを指す窓ができてしまう。
+      modal.append(h("p", { class: "hint" }, ["別のフォルダを開くのは最初の窓から。この窓はそのとき閉じます。"]));
+    }
     modal.append(actions);
     openModal();
   };
@@ -1947,10 +1997,16 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       // チュートリアルは一覧から始める（最初に押す場所がサイドバーの `+` で、
       // 真ん中がマニュアルのままだと案内の出る画面と合わない）。
       renderManual(body, MANUAL_DOC, {
-        onTour: () => {
-          goList();
-          tutorial?.start();
-        },
+        // サブ窓では出さない。チュートリアルは済んだ印を localStorage に書く。
+        ...(persistent
+          ? {
+              onTour: () => {
+                goList();
+                tutorial?.start();
+              },
+            }
+          : {}),
+        ...(options.openWindow ? { onWindow: () => options.openWindow?.({ kind: "manual" }) } : {}),
       });
       return;
     }
@@ -2034,7 +2090,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
 
   const render = (): void => {
     // 描き直しはすべての操作の終点なので、場所の保存もここに1つ置けば足りる。
-    savePlace(state);
+    if (persistent) savePlace(state);
     // 別のノードを開いたら、メモは読む顔に戻す。書きかけのものは `blur` で
     // 保存されるので消えない（保存の経路は編集欄と「閲覧」ボタンの2つだけ）。
     if (state.selectedId !== lastSelected) {
@@ -2126,7 +2182,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     render();
   });
   // 空の vault を開いたときだけ自動で始める。既にデータがある人には出さない。
-  if (Object.keys(state.graph.nodes).length === 0 && !readTourDone()) tutorial.start();
+  // サブ窓では始めない。済んだ印を書くのは本窓だけ（`AppOptions.sub`）。
+  if (persistent && Object.keys(state.graph.nodes).length === 0 && !readTourDone()) tutorial.start();
 
   return {
     async reload() {

@@ -2793,3 +2793,103 @@ describe("期限の伝播", () => {
     expect(text("inspector")).not.toContain("に間に合わせる");
   });
 });
+
+const { MarkdownGraphStore } = await import("../store/store.ts");
+
+describe("別窓（2026-09-28）", () => {
+  /** 見本の vault でのノードの id。サブ窓は id で最初の場所を受け取る。 */
+  const idOf = async (name: string): Promise<string> => {
+    const { graph } = await new MarkdownGraphStore(sampleFs()).load();
+    return Object.values(graph.nodes).find((n) => n.name === name)!.id;
+  };
+  const menuLabels = (): string[] =>
+    Array.from(document.querySelectorAll(".ctx-item")).map((b) => b.textContent ?? "");
+  const rightClickNode = async (label: string): Promise<void> => {
+    const g = Array.from($("center-body").querySelectorAll("g.graph-node")).find((x) =>
+      (x.textContent ?? "").includes(label),
+    )!;
+    g.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
+    await tick();
+  };
+
+  test("開く口を渡さないシェルでは、右クリックに「別窓で開く」を出さない", async () => {
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    await rightClickNode("MVP実装完了");
+    expect(menuLabels().join(" ")).toContain("分解する"); // 陽性対照: メニューは出ている
+    expect(menuLabels().join(" ")).not.toContain("別窓で開く");
+  });
+
+  test("ノードの右クリックから、そのノードを指して別窓を開く", async () => {
+    document.body.innerHTML = HTML;
+    const opened: unknown[] = [];
+    await startApp(sampleFs(), { openWindow: (t) => opened.push(t) });
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    await rightClickNode("MVP実装完了");
+    (Array.from(document.querySelectorAll(".ctx-item")).find((b) =>
+      (b.textContent ?? "").includes("別窓で開く"),
+    ) as HTMLButtonElement).click();
+    expect(opened).toEqual([{ kind: "node", id: await idOf("MVP実装完了") }]);
+  });
+
+  test("マニュアルから、マニュアルを指して別窓を開く", async () => {
+    document.body.innerHTML = HTML;
+    const opened: unknown[] = [];
+    await startApp(sampleFs(), { openWindow: (t) => opened.push(t) });
+    $("tour-btn").click();
+    await tick();
+    findButton("center-body", "別窓で開く")!.click();
+    expect(opened).toEqual([{ kind: "manual" }]);
+  });
+
+  test("サブ窓は頼まれたノードのグラフから始まる", async () => {
+    document.body.innerHTML = HTML;
+    await startApp(sampleFs(), { sub: { initial: { kind: "node", id: await idOf("MVP実装完了") } } });
+    expect($("center-body").querySelector("svg")).toBeTruthy();
+    expect(text("breadcrumb")).toContain("MVP実装完了");
+    expect(text("inspector")).toContain("MVP実装完了");
+  });
+
+  test("サブ窓のマニュアルにはチュートリアルの入口を出さない", async () => {
+    document.body.innerHTML = HTML;
+    await startApp(sampleFs(), { sub: { initial: { kind: "manual" } }, openWindow: () => {} });
+    expect(text("center-body")).toContain("考え方"); // 陽性対照: マニュアルが出ている
+    expect(findButton("center-body", "別窓で開く")).toBeTruthy();
+    expect(findButton("center-body", "チュートリアルをもう一度")).toBeUndefined();
+  });
+
+  test("消えたノードを指したサブ窓は「今やれること」から始まる", async () => {
+    document.body.innerHTML = HTML;
+    await startApp(sampleFs(), { sub: { initial: { kind: "node", id: "01NOTHERE0000000000000000" } } });
+    expect(text("breadcrumb")).toContain("今やれること");
+  });
+
+  test("サブ窓は前回の場所を書かず、本窓の場所も読まない", async () => {
+    // 本窓が潜った先を覚えている状態
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    const saved = localStorage.getItem("sirube.place");
+    expect(saved).toContain("graph"); // 陽性対照: 本窓は書いている
+
+    document.body.innerHTML = HTML;
+    await startApp(sampleFs(), { sub: {} });
+    // 本窓の続きからは始めない
+    expect(text("breadcrumb")).toContain("今やれること");
+    // サブ窓で潜っても、本窓の場所は書き換わらない
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    expect(text("breadcrumb")).toContain("確定申告");
+    expect(localStorage.getItem("sirube.place")).toBe(saved);
+  });
+
+  test("サブ窓ではフォルダを切り替えられない", async () => {
+    document.body.innerHTML = HTML;
+    await startApp(sampleFs(), { vault: { path: "C:\Users\me\my-vault" }, sub: {} });
+    $("vault-btn").click();
+    await tick();
+    expect(text("modal")).toContain("C:\Users\me\my-vault"); // 陽性対照: 場所は見える
+    expect(findButton("modal", "別のフォルダを開く")).toBeUndefined();
+    expect(text("modal")).toContain("最初の窓から");
+  });
+});

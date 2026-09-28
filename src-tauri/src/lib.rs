@@ -8,6 +8,7 @@
 // Bun compile 版はランタイム本体だけで 84MB あり、それが配布時の AV スキャン待ちを
 // 悪化させていた。
 
+use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 
 /// ユーザーが選んだ vault フォルダを fs プラグインのスコープに入れる。
@@ -45,6 +46,17 @@ pub fn run() {
         )?;
       }
       Ok(())
+    })
+    // 本窓を閉じたらアプリごと終える（2026-09-28、別窓を足したとき）。Tauri は
+    // 窓が1つでも残っていれば動き続けるので、放っておくとサブ窓だけが残る。
+    // サブ窓は設定を何も保存しない（`AppOptions.sub`）ので、本窓の無いまま残すと
+    // 次に開いたとき何も覚えていない窓で作業を続けることになる。
+    .on_window_event(|window, event| {
+      if window.label() == "main" {
+        if let tauri::WindowEvent::Destroyed = event {
+          window.app_handle().exit(0);
+        }
+      }
     })
     .invoke_handler(tauri::generate_handler![allow_vault])
     .run(tauri::generate_context!())

@@ -7,21 +7,35 @@
 // 本文の正は `docs/manual.md`（`manual-doc.ts` に焼き込み）。描くのはメモと同じ
 // `renderNote`——記法の解釈を2つ持たない。章（`##`）ごとに目次を作り、押すと飛ぶ。
 
-import { h } from "./dom.ts";
+import { h, iconSpan } from "./dom.ts";
 import { renderNote } from "./note-view.ts";
 
 export interface ManualCallbacks {
-  /** 「チュートリアルをもう一度」。 */
-  onTour(): void;
+  /** 「チュートリアルをもう一度」。渡さなければ出さない（サブ窓）。 */
+  onTour?(): void;
+  /** 「別窓で開く」。マニュアルを横に置いたまま操作するため（2026-09-28）。
+   *  別窓を開けるシェルだけが渡す。 */
+  onWindow?(): void;
 }
 
 export function renderManual(container: HTMLElement, text: string, cb: ManualCallbacks): void {
   container.replaceChildren();
   const page = h("div", { class: "manual" });
 
-  const tour = h("button", { class: "btn", type: "button" }, ["チュートリアルをもう一度"]);
-  tour.addEventListener("click", () => cb.onTour());
-  page.append(h("div", { class: "manual-actions" }, [tour]));
+  const actions: HTMLElement[] = [];
+  const { onTour, onWindow } = cb;
+  if (onTour) {
+    const tour = h("button", { class: "btn", type: "button" }, ["チュートリアルをもう一度"]);
+    tour.addEventListener("click", () => onTour());
+    actions.push(tour);
+  }
+  if (onWindow) {
+    const win = h("button", { class: "btn", type: "button" });
+    win.append(iconSpan("appWindow", 14), "別窓で開く");
+    win.addEventListener("click", () => onWindow());
+    actions.push(win);
+  }
+  if (actions.length > 0) page.append(h("div", { class: "manual-actions" }, actions));
 
   const body = h("div", { class: "note-view manual-body" });
   renderNote(body, text);

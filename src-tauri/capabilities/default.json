@@ -1,12 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Sirube が必要とする最小の権限。ユーザーが選んだ vault フォルダの読み書き・監視、フォルダ選択ダイアログ、そして「今どの vault を開いているか」をアプリのデータフォルダへ書き出すこと。",
+  "description": "Sirube が必要とする最小の権限。別窓（sub-*）も同じ権限で開き、本窓から開いたり閉じたりする。ユーザーが選んだ vault フォルダの読み書き・監視、フォルダ選択ダイアログ、そして「今どの vault を開いているか」をアプリのデータフォルダへ書き出すこと。",
   "windows": [
-    "main"
+    "main",
+    "sub-*"
   ],
   "permissions": [
     "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-destroy",
     "dialog:allow-open",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",

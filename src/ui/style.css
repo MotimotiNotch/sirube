@@ -1426,7 +1426,7 @@ body.no-inspector #inspector-resizer {
 
 /* 読み物なので行を長くしすぎない。メモと同じ .note-view を使い、字だけ一回り大きく。 */
 .manual { max-width: 760px; margin: 0 auto; padding: 20px 24px 64px; }
-.manual-actions { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.manual-actions { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 12px; }
 .manual-toc {
   display: flex;
   flex-wrap: wrap;
