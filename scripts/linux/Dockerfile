@@ -17,6 +17,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       desktop-file-utils unzip \
   && rm -rf /var/lib/apt/lists/*
 
+# 日本語入力の GTK3 モジュール（2026-09-28）。linuxdeploy-plugin-gtk は、ビルド
+# ホストにある immodules を AppImage に同梱し、起動時に `GTK_IM_MODULE_FILE` を
+# 同梱の一覧へ固定する。つまり**ここに無いモジュールは、利用者のホストに入って
+# いても読まれない**。入れていなかったので、fcitx5 + Mozc の環境（Bazzite）で
+# 日本語が入らなかった。モジュールは D-Bus でホストのデーモンに話すだけなので、
+# 同梱するのは GTK 側の口だけで足りる。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      fcitx5-frontend-gtk3 ibus-gtk3 \
+  && rm -rf /var/lib/apt/lists/*
+
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:/root/.bun/bin:$PATH

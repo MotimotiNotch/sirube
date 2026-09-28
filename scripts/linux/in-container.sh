@@ -36,6 +36,18 @@ removed=$(ls squashfs-root/usr/lib/libwayland-*.so* 2>/dev/null | wc -l)
 [ "$removed" -gt 0 ] || { echo "libwayland が同梱されていない（linuxdeploy の挙動が変わった？）" >&2; exit 1; }
 rm -f squashfs-root/usr/lib/libwayland-*.so*
 echo "libwayland を ${removed} 個外した"
+
+# 日本語入力のモジュールを選ぶ起動フックを足す（中身と理由は apprun-ime.sh）。
+# linuxdeploy の AppRun は apprun-hooks/ を丸ごと読むのではなく、フックごとに
+# source の行を持っている。置くだけでは読まれないので、exec の直前に1行足す。
+# AppRun は `set -e` なので、フックの中で失敗するコマンドを書くと起動ごと止まる。
+cp /work/apprun-ime.sh squashfs-root/apprun-hooks/sirube-ime.sh
+grep -q '^exec ' squashfs-root/AppRun || { echo "AppRun に exec の行が無い（linuxdeploy の AppRun の形が変わった？）" >&2; exit 1; }
+sed -i 's|^exec |source "$this_dir"/apprun-hooks/"sirube-ime.sh"\nexec |' squashfs-root/AppRun
+grep -q 'sirube-ime.sh' squashfs-root/AppRun || { echo "AppRun にフックを足せなかった" >&2; exit 1; }
+for m in im-fcitx5.so im-ibus.so; do
+  [ -e "squashfs-root/usr/lib/gtk-3.0/3.0.0/immodules/$m" ] || { echo "$m が同梱されていない（Dockerfile の fcitx5-frontend-gtk3 / ibus-gtk3）" >&2; exit 1; }
+done
 rm -f "$img"
 ARCH=x86_64 appimagetool --no-appstream squashfs-root "$img"
 rm -rf squashfs-root
