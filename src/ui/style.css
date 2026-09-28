@@ -522,6 +522,23 @@ body.no-inspector #inspector-resizer {
   font-size: 11px;
   color: var(--fg-faint);
 }
+/* 「今やれること」と検索結果（2026-09-28）。列の顔ぶれは中身で変わる（全行で空の
+ * 列は出さない）ので、列幅は描くときに見出しと行の両方へ --list-cols で渡す。
+ * 見出しは並べ替えの取っ手ではなく、ただのラベル。 */
+.list-cols.plain { grid-template-columns: var(--list-cols); }
+.hit.plain .hit-main {
+  display: grid;
+  grid-template-columns: var(--list-cols);
+  column-gap: 10px;
+}
+.hit.plain .hit-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hit.plain .hit-crumb { margin-left: 0; padding-left: 0; }
+.hit-cell { display: flex; min-width: 0; }
 .list-col { display: inline-flex; align-items: center; gap: 2px; justify-self: start; white-space: nowrap; }
 .list-col.sortable {
   border: 0;

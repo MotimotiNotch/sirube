@@ -39,6 +39,10 @@ const openMore = async (): Promise<void> => {
   }
 };
 
+/** 一覧の合流の列に出ている数。見出しが「合流」と言うので、セルは数だけ（2026-09-28）。 */
+const mergeCounts = (): string[] =>
+  Array.from($("center-body").querySelectorAll(".hit-indegree[title*='箇所から要求']")).map((e) => e.textContent ?? "");
+
 beforeEach(async () => {
   document.body.innerHTML = HTML;
   // 前回開いていた場所は localStorage に残る。消さないと直前のテストが潜って
@@ -759,9 +763,11 @@ describe("目的の俯瞰（配下の今やれること）", () => {
   test("絞ったらパンくずの列は出さない（全行で同じ値になる）", async () => {
     toggle("俯瞰").click();
     await tick();
-    const crumbs = Array.from($("center-body").querySelectorAll(".hit-crumb"));
-    expect(crumbs.length).toBeGreaterThan(0);
-    expect(crumbs.every((c) => (c.textContent ?? "") === "")).toBe(true);
+    // 列ごと出さない（2026-09-28 に列を揃えてから。以前は空のパンくずを置いていた）
+    expect($("center-body").querySelectorAll(".hit").length).toBeGreaterThan(0);
+    expect($("center-body").querySelectorAll(".hit-crumb").length).toBe(0);
+    const labels = Array.from($("center-body").querySelectorAll(".list-cols.plain .list-col")).map((e) => e.textContent);
+    expect(labels).not.toContain("目的");
   });
 
   test("進捗はここに出さない（サイドバーとインスペクタが既に出している）", async () => {
@@ -1227,7 +1233,7 @@ describe("まとめて追加（DSL）", () => {
     await tick();
     // 合流点として1ノードに解決される（2つ作られない）
     expect($("center-body").querySelectorAll(".hit").length).toBe(1);
-    expect(text("center-body")).toContain("合流 2");
+    expect(mergeCounts()).toContain("2");
   });
 
   test("既存の名前を書けば繋がるだけで、新しくは作られない", async () => {
@@ -1273,7 +1279,7 @@ describe("まとめて追加（DSL）", () => {
     input.dispatchEvent(new Event("input"));
     await tick();
     // 親は「領収書整理」の1つだけになり、合流点ではなくなる
-    expect(text("center-body")).not.toContain("合流 2");
+    expect(mergeCounts()).not.toContain("2");
 
     // 外した線はヘッダーの「戻す」で戻り、合流点に戻る（2026-09-14）
     expect($("undo-btn").classList.contains("hidden")).toBe(false);
@@ -1281,7 +1287,7 @@ describe("まとめて追加（DSL）", () => {
     await tick();
     input.dispatchEvent(new Event("input"));
     await tick();
-    expect(text("center-body")).toContain("合流 2");
+    expect(mergeCounts()).toContain("2");
   });
 
   test("「そのまま」なら何も外さない", async () => {
@@ -1295,7 +1301,7 @@ describe("まとめて追加（DSL）", () => {
     input.value = "医療費の領収書";
     input.dispatchEvent(new Event("input"));
     await tick();
-    expect(text("center-body")).toContain("合流 2");
+    expect(mergeCounts()).toContain("2");
   });
 
   test("構文エラーは押す前に出す", async () => {
@@ -1455,11 +1461,32 @@ describe("最近の変更", () => {
     expect(rowNames()[0]).toBe("いま作った目的");
   });
 
-  test("「今やれること」には日付も列の見出しも出さない", async () => {
+  test("「今やれること」には日付を出さず、見出しは並べ替えの取っ手にしない", async () => {
     $("nav-actionable").click();
     await tick();
     expect($("center-body").querySelector(".hit-date")).toBeNull();
-    expect($("center-body").querySelector(".list-cols")).toBeNull();
+    // 見出しはある（2026-09-28、列を揃えた）。ただし押しても並びは変わらない
+    // ——並びは構造から出る優先度。
+    expect($("center-body").querySelector(".list-cols.plain")).not.toBeNull();
+    expect($("center-body").querySelector(".list-cols .sortable")).toBeNull();
+  });
+
+  test("「今やれること」は見出しと行が同じ列の数で揃う", async () => {
+    $("nav-actionable").click();
+    await tick();
+    const labels = Array.from($("center-body").querySelectorAll(".list-cols.plain .list-col")).map((e) => e.textContent);
+    expect(labels.slice(0, 2)).toEqual(["番号", "名前"]);
+    expect(labels).toContain("目的");
+    // 全行で同じ状態なので状態の列は出さない（原則2）
+    expect(labels).not.toContain("状態");
+    const rows = Array.from($("center-body").querySelectorAll(".hit.plain > .hit-main"));
+    expect(rows.length).toBeGreaterThan(1);
+    // 値が無い行も空の枠を置くので、どの行も見出しと同じ数の子を持つ
+    for (const r of rows) expect(r.children.length).toBe(labels.length);
+    // 全行で空になる列は出さない（合流・期限は、値のある行が1つでもあるときだけ）
+    labels.forEach((_, i) => {
+      expect(rows.some((r) => (r.children[i]?.textContent ?? "") !== "")).toBe(true);
+    });
   });
 
   describe("列の見出しで並べ替える", () => {

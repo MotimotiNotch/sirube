@@ -61,6 +61,23 @@ function recentHeader(sort: RecentSort, cb: ListCallbacks): HTMLElement {
   return row;
 }
 
+/** 「今やれること」と検索結果の列（2026-09-28、のっち「縦に項目が並んでないから
+ *  気持ち悪い」）。以前は行ごとの flex で、右端の合流・期限が出たり出なかったり
+ *  するぶん、その左の目的の位置が行ごとに動いていた。
+ *
+ *  **見出しは押しても並べ替えない。** 並びは構造から出る優先度で、手で崩させない
+ *  ——見出しを付けなかったのはこのためで、列を揃えることに反対していたわけでは
+ *  なかった。**全行で空になる列は出さない**（原則2）。合流が1件も無ければ合流の列ごと消す。 */
+type PlainCol = "number" | "name" | "indegree" | "due" | "goal" | "state";
+const PLAIN_COLUMNS: Record<PlainCol, { label: string; width: string }> = {
+  number: { label: "番号", width: "46px" },
+  name: { label: "名前", width: "minmax(84px, 2fr)" },
+  indegree: { label: "合流", width: "52px" },
+  due: { label: "期限", width: "84px" },
+  goal: { label: "目的", width: "minmax(0, 1fr)" },
+  state: { label: "状態", width: "108px" },
+};
+
 export function renderList(
   container: HTMLElement,
   graph: Graph,
@@ -108,11 +125,34 @@ export function renderList(
   // 「今やれること」には付けない——並びは構造から出る優先度で、手で崩させない。
   if (recent && opts.recentSort) container.append(recentHeader(opts.recentSort, cb));
 
+  const plainCols: PlainCol[] = recent
+    ? []
+    : (["number", "name", "indegree", "due", "goal", "state"] as const).filter((c) =>
+        c === "indegree"
+          ? result.hits.some((x) => x.inDegree > 1)
+          : c === "due"
+          ? result.hits.some((x) => x.due)
+          : c === "goal"
+          ? !opts.scoped
+          : c === "state"
+          ? mixedState
+          : true,
+      );
+  // 列幅は見出しと行で1つの値を共有する（`.recent` の --recent-cols と同じ考え方）。
+  const plainStyle = `--list-cols: ${plainCols.map((c) => PLAIN_COLUMNS[c].width).join(" ")}`;
+  if (!recent) {
+    const head = h("div", { class: "list-cols plain", style: plainStyle });
+    for (const c of plainCols) head.append(h("span", { class: "list-col" }, [PLAIN_COLUMNS[c].label]));
+    container.append(head);
+  }
+
   for (const hit of result.hits) {
     const node = graph.nodes[hit.id];
     if (!node) continue;
 
-    const card = h("div", { class: recent ? "hit recent" : "hit", "data-node-id": node.id });
+    const card = recent
+      ? h("div", { class: "hit recent", "data-node-id": node.id })
+      : h("div", { class: "hit plain", "data-node-id": node.id, style: plainStyle });
 
     // 付箋は行の左の縁に。**俯瞰では出さない**——全行が同じ目的の下にいるので
     // 全行で同じ色になる（規則2）。パンくずを消しているのと同じ理由。
@@ -132,9 +172,8 @@ export function renderList(
     const main = h("button", { class: "hit-main", type: "button" });
     // 番号は名前の前。行頭で揃うと「一覧の中の場所」ではなく「その札」として
     // 読める（右端に置くと、パンくずや期限と並んで属性の1つに見える）。
-    // 表の形（最近の変更）では番号が無くても枠を置く。grid の列がずれる。
-    if (hit.number !== undefined) main.append(h("span", { class: "hit-number" }, [`#${hit.number}`]));
-    else if (recent) main.append(h("span", { class: "hit-number" }));
+    // 番号が無くても枠を置く。grid の列がずれる。
+    main.append(h("span", { class: "hit-number" }, hit.number !== undefined ? [`#${hit.number}`] : []));
     const name = h("span", { class: "hit-name" }, [node.name]);
 
     // パンくずは名前と同じ行の右側へ。二段組をやめると行数が半分以下になる。
@@ -155,20 +194,22 @@ export function renderList(
     const crumb = h("span", { class: "hit-crumb" }, [crumbText]);
     if (crumbText) crumb.title = `${crumbText} の下`;
 
-    const meta = h("div", { class: "hit-meta" });
-    if (hit.inDegree > 1) {
-      meta.append(h("span", { class: "hit-indegree", title: `${hit.inDegree} 箇所から要求されている（片付けると複数が進む）` }, [`合流 ${hit.inDegree}`]));
-    }
+    // 列の見出しが「合流」と言うので、表の形（今やれること）では数だけ出す。
+    const indegreeEl =
+      hit.inDegree > 1
+        ? h("span", { class: "hit-indegree", title: `${hit.inDegree} 箇所から要求されている（片付けると複数が進む）` }, [
+            recent ? `合流 ${hit.inDegree}` : String(hit.inDegree),
+          ])
+        : undefined;
     // 上から伝わった期限は枠を破線にして、どこから来たかをツールチップで言う。
     // 同じ見た目にすると、自分で書いていない日付を書いたように読める。
+    let dueEl: HTMLElement | undefined;
     if (hit.due) {
       const from = hit.dueFrom ? graph.nodes[hit.dueFrom]?.name ?? hit.dueFrom : undefined;
-      meta.append(
-        h(
-          "span",
-          { class: from ? "hit-indegree due-inherited" : "hit-indegree", title: from ? `「${from}」の期限から` : "期限" },
-          [hit.due],
-        ),
+      dueEl = h(
+        "span",
+        { class: from ? "hit-indegree due-inherited" : "hit-indegree", title: from ? `「${from}」の期限から` : "期限" },
+        [hit.due],
       );
     }
 
@@ -177,16 +218,29 @@ export function renderList(
       // 名前の後ろに寄せて名前の列の中に収める。状態は列なので揃っていても出す
       // ——空欄の列は「無い」ではなく「読み込めていない」に見える。
       const nameCell = h("span", { class: "hit-namecell" }, [name]);
-      if (meta.childElementCount > 0) nameCell.append(meta);
+      if (indegreeEl || dueEl) {
+        const meta = h("div", { class: "hit-meta" });
+        if (indegreeEl) meta.append(indegreeEl);
+        if (dueEl) meta.append(dueEl);
+        nameCell.append(meta);
+      }
       main.append(nameCell, crumb, h("span", { class: "hit-state" }, [stateBadge(hit.state)]));
       // 日付だけ出して時刻はツールチップ（詳細パネルと同じ出し方）。
       const date = h("span", { class: "hit-date" }, node.mtimeMs > 0 ? [formatDate(node.mtimeMs)] : []);
       if (node.mtimeMs > 0) date.title = `更新 ${formatDateTime(node.mtimeMs)}`;
       main.append(date);
     } else {
-      main.append(name, crumb);
-      if (mixedState) meta.append(stateBadge(hit.state));
-      main.append(meta);
+      // 列は見出しと同じ並び。出ている列には、値が無くても空の枠を置く。
+      const cell = (child: HTMLElement | undefined, cls = "hit-cell"): HTMLElement =>
+        h("span", { class: cls }, child ? [child] : []);
+      for (const c of plainCols) {
+        if (c === "number") continue; // 上で置いた
+        if (c === "name") main.append(name);
+        else if (c === "indegree") main.append(cell(indegreeEl));
+        else if (c === "due") main.append(cell(dueEl));
+        else if (c === "goal") main.append(crumb);
+        else main.append(cell(stateBadge(hit.state), "hit-state"));
+      }
     }
     main.addEventListener("click", () => cb.onSelect(hit.id));
     card.append(main);
