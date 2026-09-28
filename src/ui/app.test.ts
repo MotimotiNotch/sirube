@@ -1345,6 +1345,44 @@ describe("前提の一括追加", () => {
     expect(text("inspector")).not.toContain("これが必要");
   });
 
+  test("既にある名前は下見で「既存に繋ぐ」と分けて出し、追加後も0件とは言わない", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    findButton("inspector", "分解する")!.click();
+    await tick();
+    const ta = $("modal").querySelector("textarea") as HTMLTextAreaElement;
+
+    // 新規だけのときは今までどおり
+    ta.value = "マイナンバーカードを用意する";
+    ta.dispatchEvent(new Event("input"));
+    expect(text("modal")).toContain("1 件の前提を追加します");
+    expect(text("modal")).not.toContain("既存に繋ぎます");
+
+    // 既存の名前と、もう前提になっているもの
+    ta.value = "マイナンバーカードを用意する\n実績を作る\n領収書整理";
+    ta.dispatchEvent(new Event("input"));
+    expect(text("modal")).toContain("2 件の前提を追加します（うち 1 件は既存に繋ぎます）");
+    expect(text("modal")).toContain("1 件は既に前提です");
+
+    findButton("modal", "追加")!.click();
+    await tick();
+    expect(text("toast-stack")).toContain("2 件を追加しました（うち 1 件は既存に繋ぎました）");
+  });
+
+  test("既存に繋いだだけのとき「0 件を追加しました」と言わない（2026-09-28）", async () => {
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    findButton("inspector", "分解する")!.click();
+    await tick();
+    const ta = $("modal").querySelector("textarea") as HTMLTextAreaElement;
+    ta.value = "実績を作る";
+    ta.dispatchEvent(new Event("input"));
+    findButton("modal", "追加")!.click();
+    await tick();
+    expect(text("toast-stack")).toContain("1 件を既存に繋ぎました");
+    expect(text("toast-stack")).not.toContain("0 件");
+  });
+
   test("中身タブに切り替えると問いが変わり、書きかけは持ち越される", async () => {
     findButton("root-list", "確定申告")!.click();
     await tick();

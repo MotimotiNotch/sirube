@@ -1311,10 +1311,52 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     ta.value = draft;
     modal.append(ta);
 
+    const label = kind === "requires" ? "前提" : "中身";
+    // 書いた行を「新しく作る／既存に繋ぐ／もう繋がっている」に分ける（2026-09-28、
+    // のっち）。行数だけ数えると、既にある名前を書いたとき「新しく作られたのでは」
+    // という不安が残る——「まとめて書く」の下見が既に分けて出しているのと揃える。
+    // 名前の突き合わせはストア（`mergeByName`）と同じ正規化・同名は先勝ち。
+    const classify = (): { fresh: number; linked: number; already: number } => {
+      const byName = new Map<string, string>();
+      for (const [id, n] of Object.entries(state.graph.nodes)) {
+        const key = normalizeForDuplicateCheck(n.name);
+        if (!byName.has(key)) byName.set(key, id);
+      }
+      const current = new Set(state.graph.nodes[targetId]?.[kind] ?? []);
+      const keys = new Set(
+        ta.value
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map(normalizeForDuplicateCheck),
+      );
+      let fresh = 0;
+      let linked = 0;
+      let already = 0;
+      for (const key of keys) {
+        const id = byName.get(key);
+        if (id === undefined) fresh += 1;
+        else if (current.has(id)) already += 1;
+        else linked += 1;
+      }
+      return { fresh, linked, already };
+    };
     const preview = h("div", { class: "hint", style: "margin-top:8px;font-size:12px" });
     const updatePreview = (): void => {
-      const lines = ta.value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-      preview.textContent = lines.length === 0 ? "" : `${lines.length} 件の${kind === "requires" ? "前提" : "中身"}を追加します`;
+      const { fresh, linked, already } = classify();
+      const adding = fresh + linked;
+      if (adding + already === 0) {
+        preview.textContent = "";
+        return;
+      }
+      const parts: string[] = [];
+      if (adding > 0) {
+        parts.push(
+          linked > 0 ? `${adding} 件の${label}を追加します（うち ${linked} 件は既存に繋ぎます）` : `${adding} 件の${label}を追加します`,
+        );
+      }
+      if (already > 0) parts.push(`${already} 件は既に${label}です`);
+      preview.textContent = parts.join("。");
     };
     updatePreview();
     ta.addEventListener("input", updatePreview);
@@ -1334,6 +1376,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     });
     ok.addEventListener("click", async () => {
       const containsBefore = [...(state.graph.nodes[targetId]?.contains ?? [])];
+      // 書く前に数える。書いた後の graph では、新しく作ったものも「既存」に見える。
+      const { linked } = classify();
       const res = await store.addBulk(state.graph, targetId, ta.value, kind);
       if (res.errors.length > 0) {
         toast(res.errors[0]!.message);
@@ -1342,7 +1386,18 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       recompute();
       closeModal();
       focusFresh(targetId);
-      toast(`${res.created.length} 件を追加しました`);
+      // 新しく作った数だけ数えると、既存に繋いだだけのとき「0 件を追加しました」
+      // になり、失敗に読める（2026-09-28 に見つけた）。
+      const made = res.created.length;
+      toast(
+        made > 0 && linked > 0
+          ? `${made + linked} 件を追加しました（うち ${linked} 件は既存に繋ぎました）`
+          : made > 0
+          ? `${made} 件を追加しました`
+          : linked > 0
+          ? `${linked} 件を既存に繋ぎました`
+          : `どれも既に${label}です`,
+      );
       if (kind === "requires") offerShortcuts(res.addedRequires);
       else offerReopen(targetId, containsBefore);
     });
