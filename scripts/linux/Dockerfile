@@ -26,6 +26,10 @@ RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.98.0 --p
 
 RUN curl -fsSL https://bun.sh/install | bash
 
+# 焼いた AppImage から libwayland を外して詰め直すのに使う（in-container.sh）。
+# 版は固定する——continuous を取ると、同じ Dockerfile から別のものが焼ける。
+RUN curl -fsSL -o /usr/local/bin/appimagetool       https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage   && chmod +x /usr/local/bin/appimagetool
+
 # linuxdeploy（Tauri が AppImage 生成に使う）は FUSE を要求するが、コンテナには
 # /dev/fuse が無い。展開して実行させることで回避する。--privileged を避けるため。
 ENV APPIMAGE_EXTRACT_AND_RUN=1
