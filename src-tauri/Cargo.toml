@@ -28,3 +28,8 @@ tauri-plugin-log = "2"
 # になる（2026-08-31 の初回起動で踏んだ）。外部編集の即時反映は必須機能。
 tauri-plugin-fs = { version = "2.5.1", features = ["watch"] }
 tauri-plugin-dialog = "2.7.2"
+
+# Linux だけ: WebView の入力メソッドの設定に触る（lib.rs の on_page_load）。
+# 版は wry が固定しているもの（=2.0.2）に揃える。ずれると別の型になって渡せない。
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }

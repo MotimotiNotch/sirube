@@ -58,6 +58,25 @@ pub fn run() {
         }
       }
     })
+    // Linux で、変換中の文字（下線付きのひらがな）を入力欄の中に描かせる
+    // （2026-09-28）。wry 0.55 は WebView を作るときに無条件で
+    // `set_enable_preedit(false)` を呼ぶ——古い WebKitGTK で fcitx の候補窓が
+    // カーソルに付いてこなかったのを避けるための処置で、代わりに変換中の文字が
+    // fcitx の窓（入力欄の外）に出る。同梱の WebKitGTK は 2.50.4 で、2.50 以降は
+    // 位置ずれが起きないとされる（tauri-apps/wry#1724、切り替えを設定にする PR が
+    // open のまま）。作った後に呼び直して戻す。PR がマージされたらそちらへ移す。
+    // ページを読むたびに呼ぶので、別窓にも効く。
+    .on_page_load(|webview, _payload| {
+      #[cfg(target_os = "linux")]
+      let _ = webview.with_webview(|wv| {
+        use webkit2gtk::{InputMethodContextExt, WebViewExt};
+        if let Some(ctx) = wv.inner().input_method_context() {
+          ctx.set_enable_preedit(true);
+        }
+      });
+      #[cfg(not(target_os = "linux"))]
+      let _ = webview;
+    })
     .invoke_handler(tauri::generate_handler![allow_vault])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
