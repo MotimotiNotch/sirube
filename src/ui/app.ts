@@ -844,7 +844,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     render();
     // 戻し方まで言う。「戻す」は次の操作で上書きされるので、そのあとに戻したく
     // なったときの書き方も残す。
-    toast(`「${parentName}」から「${childName}」を外しました（ヘッダーの「戻す」、またはまとめて追加に「${parentName} -> ${childName}」で戻せます）`);
+    toast(`「${parentName}」から「${childName}」を外しました（ヘッダーの「戻す」、または「まとめて書く」に「${parentName} -> ${childName}」で戻せます）`);
   };
 
   /**
@@ -948,7 +948,9 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       }
     } else {
       items.push({ label: "目的を1つ作る", icon: "plus", onSelect: () => openAdd("one") });
-      items.push({ label: "まとめて追加", icon: "listChecks", onSelect: () => openAdd("bulk") });
+      // 呼び名は作る画面のタブ「まとめて書く」に揃える（2026-09-28。以前はここと
+      // トーストだけ「まとめて追加」で、同じ機能に名前が2つあった）。
+      items.push({ label: "まとめて書く", icon: "listChecks", onSelect: () => openAdd("bulk") });
     }
     openContextMenu(x, y, items);
   };
@@ -967,7 +969,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     try {
       await store.renameNode(state.graph, id, name);
     } catch (e) {
-      // 同名は作らせない。名前で参照を解決する経路（まとめて追加）があるので、
+      // 同名は作らせない。名前で参照を解決する経路（まとめて書く）があるので、
       // 同じ名前が2つあるとどちらにも繋がずに止まる。
       toast(e instanceof Error ? e.message : "名前を変えられませんでした");
       render();
@@ -1599,7 +1601,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       const one = done.length === 1 ? done[0]! : undefined;
       toast(
         one
-          ? `「${nameOf(one.from)}」から「${nameOf(one.to)}」を外しました（ヘッダーの「戻す」、またはまとめて追加に「${nameOf(one.from)} -> ${nameOf(one.to)}」で戻せます）`
+          ? `「${nameOf(one.from)}」から「${nameOf(one.to)}」を外しました（ヘッダーの「戻す」、または「まとめて書く」に「${nameOf(one.from)} -> ${nameOf(one.to)}」で戻せます）`
           : `直接の線を ${done.length} 本外しました（ヘッダーの「戻す」で戻せます）`,
       );
     });

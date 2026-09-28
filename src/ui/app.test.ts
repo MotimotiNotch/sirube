@@ -944,7 +944,7 @@ describe("改名と削除", () => {
   });
 });
 
-describe("まとめて追加（DSL）", () => {
+describe("まとめて書く（DSL）", () => {
   const tab = (label: string): HTMLButtonElement =>
     Array.from($("modal").querySelectorAll(".modal-tab")).find(
       (b) => b.textContent === label,
@@ -2373,7 +2373,7 @@ describe("右クリックのメニュー", () => {
     await openGraph();
     await rightClick($("center-body").querySelector(".graph-wrap")!);
     expect(menuLabels().join(" ")).toContain("目的を1つ作る");
-    expect(menuLabels().join(" ")).toContain("まとめて追加");
+    expect(menuLabels().join(" ")).toContain("まとめて書く");
     expect(menuLabels().join(" ")).not.toContain("達成");
   });
 
