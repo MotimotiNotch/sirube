@@ -72,7 +72,11 @@ describe("チュートリアル", () => {
     localStorage.setItem(TOUR_DONE_KEY, "1");
     await startApp(new MemoryFs({}));
     expect(card()).toBeNull();
+    // 「使い方」はマニュアルを開き（2026-09-28）、チュートリアルはその先頭から
     (document.getElementById("tour-btn") as HTMLButtonElement).click();
+    await tick();
+    expect(card()).toBeNull();
+    buttonIn(document.getElementById("center-body"), "チュートリアルをもう一度")!.click();
     await tick();
     expect(cardText()).toContain("1 / 5"); // 陽性対照: ボタンからは始まる
   });

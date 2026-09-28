@@ -1323,6 +1323,42 @@ describe("まとめて追加（DSL）", () => {
   });
 });
 
+describe("使い方（マニュアル、2026-09-28）", () => {
+  const openManual = async (): Promise<void> => {
+    $("tour-btn").click();
+    await tick();
+  };
+
+  test("「使い方」で真ん中にマニュアルが出て、目次が章の数だけ並ぶ", async () => {
+    await openManual();
+    expect(text("breadcrumb")).toContain("使い方");
+    expect($("center-body").querySelector(".manual")).not.toBeNull();
+    const toc = Array.from($("center-body").querySelectorAll(".manual-toc button")).map((b) => b.textContent);
+    const chapters = Array.from($("center-body").querySelectorAll(".manual-body .note-h2")).map((e) => e.textContent);
+    expect(chapters.length).toBeGreaterThan(0);
+    expect(toc).toEqual(chapters);
+    expect(toc[0]).toContain("考え方");
+  });
+
+  test("サイドバーから一覧へ戻れる。場所としては保存しない", async () => {
+    await openManual();
+    // 開き直したらマニュアルではなく一覧から（見ていた場所の一部ではない）
+    expect(JSON.parse(localStorage.getItem("sirube.place") ?? "{}").mode).toBe("list");
+    $("nav-actionable").click();
+    await tick();
+    expect($("center-body").querySelector(".manual")).toBeNull();
+    expect(text("breadcrumb")).toContain("今やれること");
+  });
+
+  test("グラフへ移る経路でもマニュアルから出る", async () => {
+    await openManual();
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    expect($("center-body").querySelector(".manual")).toBeNull();
+    expect(text("breadcrumb")).toContain("確定申告");
+  });
+});
+
 describe("パンくずの頭の「ここに足す」（2026-09-28）", () => {
   const addBtn = (): HTMLButtonElement => $("breadcrumb").querySelector(".crumb-add") as HTMLButtonElement;
   const graphNode = (label: string): Element =>

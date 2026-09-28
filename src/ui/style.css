@@ -1421,3 +1421,40 @@ body.no-inspector #inspector-resizer {
 @media (prefers-reduced-motion: reduce) {
   .tour-target, .graph-node.tour-target .mark { animation: none; }
 }
+
+/* --- マニュアル（ヘッダーの「使い方」、2026-09-28） ----------------------- */
+
+/* 読み物なので行を長くしすぎない。メモと同じ .note-view を使い、字だけ一回り大きく。 */
+.manual { max-width: 760px; margin: 0 auto; padding: 20px 24px 64px; }
+.manual-actions { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.manual-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 10px 12px;
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+}
+.manual-toc button {
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.manual-toc button:hover { background: var(--bg-sunken); color: var(--fg); }
+.manual-body.note-view { font-size: 14px; }
+.manual-body .note-h1 { font-size: 20px; margin-top: 0; }
+.manual-body .note-h2 {
+  font-size: 16px;
+  margin-top: 28px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 12px;
+}
+.manual-body .note-h3 { font-size: 14px; }

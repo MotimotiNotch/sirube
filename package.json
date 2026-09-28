@@ -14,6 +14,7 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "agents-doc": "bun run scripts/gen-agents-doc.ts",
+    "manual-doc": "bun run scripts/gen-manual-doc.ts",
     "test-doc": "bun run scripts/gen-test-doc.ts"
   },
   "dependencies": {

@@ -27,6 +27,8 @@ import { renderGraph } from "./graph-view.ts";
 import { resetViewport } from "./graph-viewport.ts";
 import { renderInspector } from "./inspector.ts";
 import { renderList } from "./list-view.ts";
+import { MANUAL_DOC } from "./manual-doc.ts";
+import { renderManual } from "./manual-view.ts";
 
 interface AppState {
   graph: Graph;
@@ -34,7 +36,10 @@ interface AppState {
   /** 循環の解析（成分＋集合）。描画のたびに Tarjan を回さないよう、
    *  ここで1つ持って検索・グラフ・インスペクタへ配る。 */
   cycles: CycleInfo;
-  mode: "list" | "graph";
+  /** `"manual"` はヘッダーの「使い方」で出すマニュアル（2026-09-28）。場所としては
+   *  保存しない——開き直したら、その前に見ていた一覧かグラフへ戻る。一覧・グラフへ
+   *  移る経路はどれも `mode` を書き直すので、マニュアルから出る処理は要らない。 */
+  mode: "list" | "graph" | "manual";
   /** グラフを「ゴールだけの地図」で描くか（2026-09-11）。
    *
    * 画面を4つ目に増やさず、Chain View の**縮尺**として持つ。引くと非ゴールが
@@ -178,7 +183,7 @@ interface SavedPlace {
 
 function savePlace(state: AppState): void {
   const place: SavedPlace = {
-    mode: state.mode,
+    mode: state.mode === "manual" ? "list" : state.mode,
     layer: state.layer,
     ...(state.focusId ? { focusId: state.focusId } : {}),
     trail: state.trail,
@@ -1873,6 +1878,11 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       });
     };
 
+    if (state.mode === "manual") {
+      bar.append(h("span", { class: "current" }, ["使い方"]));
+      return;
+    }
+
     if (state.mode === "list") {
       const scopeId = state.scopeId;
       const scope = scopeId ? state.graph.nodes[scopeId] : undefined;
@@ -1933,6 +1943,17 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     // 地図は現在地が無くても描く（上にゴールが無い場所から上がったとき）。
     const graphMode = state.mode === "graph" && (!!state.focusId || state.layer === "goals");
     body.classList.toggle("graph", graphMode);
+    if (state.mode === "manual") {
+      // チュートリアルは一覧から始める（最初に押す場所がサイドバーの `+` で、
+      // 真ん中がマニュアルのままだと案内の出る画面と合わない）。
+      renderManual(body, MANUAL_DOC, {
+        onTour: () => {
+          goList();
+          tutorial?.start();
+        },
+      });
+      return;
+    }
     if (graphMode) {
       // 地図では**描くグラフと状態を引くグラフが違う**。商グラフの上で状態を
       // 導くと、畳んだぶんだけ前提が消えて「今やれる」に見える。
@@ -2040,7 +2061,12 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     // 一覧は地図の縮尺を持たない。`goList` で同じことをしているが、削除で焦点が
     // 消えて一覧へ落ちる経路など、そこを通らない道がある。
     if (state.mode === "list") state.layer = "detail";
-    document.body.classList.toggle("no-inspector", !state.selectedId || !state.graph.nodes[state.selectedId]);
+    // マニュアルの間も畳む。読み物に幅を渡す——残すと真ん中が潰れて、目次が
+    // 1語ずつ折り返した（2026-09-28、dev サーバで実測）。
+    document.body.classList.toggle(
+      "no-inspector",
+      state.mode === "manual" || !state.selectedId || !state.graph.nodes[state.selectedId],
+    );
     renderIssueBadge();
     renderUndoBtn();
     renderSidebar();
@@ -2094,7 +2120,11 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     },
     (message) => toast(message),
   );
-  el<HTMLButtonElement>("tour-btn").addEventListener("click", () => tutorial?.start());
+  // 「使い方」はマニュアルを開く（2026-09-28）。チュートリアルはマニュアルの先頭から。
+  el<HTMLButtonElement>("tour-btn").addEventListener("click", () => {
+    state.mode = "manual";
+    render();
+  });
   // 空の vault を開いたときだけ自動で始める。既にデータがある人には出さない。
   if (Object.keys(state.graph.nodes).length === 0 && !readTourDone()) tutorial.start();
 
