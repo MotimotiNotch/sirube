@@ -26,7 +26,7 @@ const VAULT_POINTER = "vault-path.txt";
 
 /** 使う vault フォルダを決める。初回はフォルダ選択ダイアログを出す。
  *
- * データは丸ごとそのフォルダの中で完結する（`nodes/*.md` と `.sirube/`）。
+ * データは丸ごとそのフォルダの中で完結する（`nodes/*.md` と、アプリが作り直す入口ファイル）。
  * Git で共有するのも Obsidian で開くのも、このフォルダ単位。 */
 async function pickVault(title: string): Promise<string | undefined> {
   const picked = await open({ directory: true, multiple: false, title });

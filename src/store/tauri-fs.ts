@@ -4,7 +4,7 @@
 // ファイル操作だけがここを通ってネイティブ側へ抜ける。`SirubeFs` という
 // 1インターフェースに閉じてあるおかげで、エンジンや DSL は一切 Tauri を知らない。
 //
-// 対象は `<vault>/nodes/*.md` だけ。設定は `<vault>/.sirube/` に置く想定。
+// 対象は `<vault>/nodes/*.md` だけ。
 
 import { mkdir, readDir, readTextFile, remove, stat, watch, writeTextFile, type UnwatchFn } from "@tauri-apps/plugin-fs";
 import { assertDocPath, type NodeFileEntry, type SirubeFs } from "./fs.ts";
@@ -29,7 +29,11 @@ export class TauriFs implements SirubeFs {
   /** `<vault>/nodes/` が無ければ作る。初回起動時用。 */
   async ensureLayout(): Promise<void> {
     await mkdir(`${this.vaultPath}/${NODES_DIR}`, { recursive: true });
-    await mkdir(`${this.vaultPath}/.sirube`, { recursive: true });
+    // 以前は `<vault>/.sirube/`（設定を置く想定）も作っていたが、何も入れないまま
+    // だった。しかも Linux では fs スコープの照合が「`.` 始まりの名前は明示しないと
+    // 一致しない」のが既定で、ここが forbidden になって**どのフォルダも開けなかった**
+    // （2026-09-28、Bazzite の友人の報告。Windows は既定が逆なので手元では出ない）。
+    // `.` 始まりのものを vault に作るときは、このことを先に思い出すこと。
   }
 
   async listNodes(): Promise<NodeFileEntry[]> {
