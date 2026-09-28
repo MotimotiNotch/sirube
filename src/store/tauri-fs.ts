@@ -8,6 +8,7 @@
 
 import { mkdir, readDir, readTextFile, remove, stat, watch, writeTextFile, type UnwatchFn } from "@tauri-apps/plugin-fs";
 import { assertDocPath, type NodeFileEntry, type SirubeFs } from "./fs.ts";
+import { isContentChange } from "./watch-filter.ts";
 
 const NODES_DIR = "nodes";
 const EXT = ".md";
@@ -116,7 +117,11 @@ export class TauriFs implements SirubeFs {
    * 一気に変わる場面で、1変更ごとに再読込するとリロード嵐になるため。
    */
   async watchNodes(onChange: () => void, debounceMs = 400): Promise<UnwatchFn> {
-    return watch(`${this.vaultPath}/${NODES_DIR}`, () => onChange(), {
+    // 出来事の種類で絞る。開いた・読んだだけで読み直すと、Linux では読み直しの
+    // 輪になる（`watch-filter.ts`）。
+    return watch(`${this.vaultPath}/${NODES_DIR}`, (e) => {
+      if (isContentChange(e.type)) onChange();
+    }, {
       recursive: false,
       delayMs: debounceMs,
     });
