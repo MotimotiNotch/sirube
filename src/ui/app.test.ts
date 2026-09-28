@@ -2794,6 +2794,68 @@ describe("期限の伝播", () => {
   });
 });
 
+describe("期限の入力欄（2026-09-28）", () => {
+  /** 名前でファイルの中身を引く。 */
+  const fileOf = (fs: ReturnType<typeof sampleFs>, name: string): string =>
+    Array.from(fs.files.values()).find((f) => f.content.includes(`name: ${name}
+`))!.content;
+  const dueInput = (): HTMLInputElement => $("inspector").querySelector(".insp-due-input") as HTMLInputElement;
+  const setDate = async (v: string): Promise<void> => {
+    const input = dueInput();
+    input.value = v;
+    input.dispatchEvent(new Event("change"));
+    await tick();
+  };
+
+  test("「その他」から期限を付けるとファイルに書かれ、前提へ伝わる", async () => {
+    const fs = sampleFs();
+    document.body.innerHTML = HTML;
+    await startApp(fs);
+    // 「Sirube をリリースする」は期限を持たない目的
+    findButton("root-list", "Sirube をリリースする")!.click();
+    await tick();
+    await openMore();
+    expect(dueInput().value).toBe("");
+    expect(text("inspector")).toContain("外の都合で日付が決まっているものにだけ");
+
+    await setDate("2027-01-10");
+    expect(fileOf(fs, "Sirube をリリースする")).toContain("due: 2027-01-10");
+    expect(text("inspector")).toContain("期限 2027-01-10");
+    // 読み直しても残っている（書いた形が `due` として読める）
+    const { graph } = await new MarkdownGraphStore(fs).load();
+    const rel = Object.values(graph.nodes).find((n) => n.name === "Sirube をリリースする")!;
+    expect(rel.due).toBe("2027-01-10");
+  });
+
+  test("「期限を外す」で期限が消え、ファイルからも行が消える", async () => {
+    const fs = sampleFs();
+    document.body.innerHTML = HTML;
+    await startApp(fs);
+    findButton("root-list", "確定申告")!.click();
+    await tick();
+    await openMore();
+    expect(dueInput().value).toBe("2027-03-15"); // 陽性対照: 自分の期限が入っている
+    findButton("inspector", "期限を外す")!.click();
+    await tick();
+    expect(fileOf(fs, "確定申告")).not.toContain("due:");
+    expect(text("inspector")).not.toContain("期限 2027-03-15");
+  });
+
+  test("伝わってきた期限は入力欄に入れず、出どころを言う", async () => {
+    // 領収書整理は確定申告（2027-03-15）の前提。伝わった期限を欄に入れると、
+    // 何も触らずに保存したとき下へ書き写すことになる。
+    const row = Array.from($("center-body").querySelectorAll(".hit")).find((r) =>
+      (r.querySelector(".hit-name")?.textContent ?? "") === "領収書整理",
+    )!;
+    (row.querySelector(".hit-main") as HTMLButtonElement).click();
+    await tick();
+    await openMore();
+    expect(dueInput().value).toBe("");
+    expect(findButton("inspector", "期限を外す")).toBeUndefined();
+    expect(text("inspector")).toContain("「確定申告」に間に合わせる期限（2027-03-15）が伝わっています");
+  });
+});
+
 const { MarkdownGraphStore } = await import("../store/store.ts");
 
 describe("別窓（2026-09-28）", () => {

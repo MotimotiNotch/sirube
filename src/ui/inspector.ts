@@ -3,7 +3,7 @@
 // ここに置く操作は「分解する」「達成をトグルする」の2つが主役。
 // 分解こそがこのツールで人間にしかできないことなので、常に手の届く位置に置く。
 
-import { effectiveDues, inDegree, progress, resolveState, type ReverseIndex } from "../core/engine.ts";
+import { DUE_FORMAT, effectiveDues, inDegree, progress, resolveState, type ReverseIndex } from "../core/engine.ts";
 import { isEndlessRoot, isGoal } from "../core/goals.ts";
 import { GOAL_COLORS, isGoalColor, type GoalColor, type Graph, type NodeState } from "../core/model.ts";
 import { nodeCreatedAt } from "../core/ulid.ts";
@@ -28,6 +28,8 @@ export interface InspectorCallbacks {
   onColor(id: string, color: GoalColor | undefined): void;
   /** ゴールとして浮上させる／やめる。 */
   onGoal(id: string, on: boolean): void;
+  /** 自分の期限を付ける／外す（`undefined` で外す）。値は `YYYY-MM-DD`。 */
+  onDue(id: string, due: string | undefined): void;
   /** 右クリック。**外す（`detach`）の入口はここへ移した**（2026-09-12）——
    *  以前は行にホバーすると出る `×` で、置いてあるだけで目に入るわりに
    *  「押すと何が消えるのか」はツールチップを読むまで分からなかった。 */
@@ -169,7 +171,7 @@ export function renderInspector(
   // 「その他」。**たまにしか押さないが、押す前に読ませたい説明があるもの**を
   // ここへ畳む（2026-09-12、のっち「右のパネルも整理できるね」）。畳めるように
   // なったのは、日々のゴール切り替えが右クリックでも届くようになったため。
-  // 中身は「ゴール（地図に出す・外す）」と「削除」の2つ。
+  // 中身は「期限」「ゴール（地図に出す・外す）」「削除」の3つ。
   const more = h("div", { class: "insp-more" });
   const moreBody = h("div", { class: "insp-more-body" });
   const moreBtn = h("button", {
@@ -184,6 +186,53 @@ export function renderInspector(
   // 「画面に無いのに探すと見つかる」ものになり、テストからも人からも同じに見えない。
   more.append(moreBtn);
   if (view.moreOpen) more.append(moreBody);
+
+  // 期限（2026-09-28）。それまでは表示と伝播だけで、**人が期限を付ける口が
+  // 無かった**（書き込みの入口は「人はアプリから」なのに）。マニュアルの6章を
+  // 書いていて気づいた。
+  //
+  // 「その他」に置くのは、付けるのが稀で、付ける前に読ませたい方針があるから
+  // ——期限は外の都合で日付が決まっているものだけ（自分で決めた目安は付けない）。
+  // 上の行の期限の表示は読むためのもので、押しても何も起きない。入口を1つにする。
+  //
+  // 付けられるのは**自分の期限だけ**。伝わってきた期限（破線）は上のノードの
+  // ものなので、ここで書くと下に書き写すことになる（AGENTS.md が禁じている形）。
+  {
+    const sec = h("div", { class: "insp-section" });
+    const head = h("h4");
+    head.append(iconSpan("calendar", 12), "期限");
+    sec.append(head);
+
+    const row = h("div", { class: "insp-due-row" });
+    const input = h("input", { class: "insp-due-input", type: "date", "aria-label": "期限" }) as HTMLInputElement;
+    input.value = node.due && DUE_FORMAT.test(node.due) ? node.due : "";
+    // 日付が1つ決まるたびに `change` が来る（年月日が揃うまでは来ない）。空に
+    // されたら外す。形が崩れた値はここでは書かない——伝播は `YYYY-MM-DD` しか
+    // 扱わないので、書いても効かない期限になる。
+    input.addEventListener("change", () => {
+      const v = input.value;
+      if (v === "") cb.onDue(selectedId, undefined);
+      else if (DUE_FORMAT.test(v)) cb.onDue(selectedId, v);
+    });
+    row.append(input);
+    if (node.due !== undefined) {
+      const clear = h("button", { class: "btn", type: "button" }, ["期限を外す"]);
+      clear.addEventListener("click", () => cb.onDue(selectedId, undefined));
+      row.append(clear);
+    }
+    sec.append(row);
+
+    // 伝わっている期限があれば、自分で付ける意味があるのは「それより早い日付が
+    // 外で決まっている」ときだけ。遅い日付を付けても効かない（早い方が効く）。
+    const inherited = due && due.from !== selectedId ? due : undefined;
+    const note = inherited
+      ? `「${graph.nodes[inherited.from]?.name ?? inherited.from}」に間に合わせる期限（${inherited.date}）が伝わっています。付けるのは、それより早い日付が外で決まっているときだけです。`
+      : node.due !== undefined
+        ? "この期限は、このノードに必要なもの（前提と中身）にも伝わります。"
+        : "外の都合で日付が決まっているものにだけ付けます（申告・契約更新など）。このノードに必要なものにも伝わります。近づいても催促はしません。";
+    sec.append(h("p", { class: "insp-note" }, [note]));
+    moreBody.append(sec);
+  }
 
   // ゴール宣言。**中腹を地図へ浮上させる1ビット**（2026-09-11）。
   //

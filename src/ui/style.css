@@ -1458,3 +1458,15 @@ body.no-inspector #inspector-resizer {
   scroll-margin-top: 12px;
 }
 .manual-body .note-h3 { font-size: 14px; }
+
+/* 期限の入力欄（2026-09-28）。日付の選択はブラウザ（WebView2）の部品に任せる。 */
+.insp-due-row { display: flex; align-items: center; gap: 6px; }
+.insp-due-input {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
+}

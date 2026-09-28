@@ -788,7 +788,7 @@ export interface EffectiveDue {
 }
 
 /** 伝える期限の書式。文字列の大小がそのまま日付の前後になる形だけを扱う。 */
-const DUE_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
+export const DUE_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * 期限を前提へ伝える（2026-09-14、MOC で「既存タスク管理に無い性質」として

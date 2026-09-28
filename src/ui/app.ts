@@ -800,6 +800,18 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     render();
   };
 
+  /** 自分の期限を付ける／外す。**`recompute` を通す**——伝わった期限は描くたびに
+   *  導くが、入口ファイル（MOC）も同じ期限を載せているので書き直させる。 */
+  const setDue = async (id: string, due: string | undefined): Promise<void> => {
+    const node = state.graph.nodes[id];
+    if (!node || node.due === due) return;
+    if (due === undefined) delete node.due;
+    else node.due = due;
+    await store.persist(state.graph, [id]);
+    recompute();
+    render();
+  };
+
   /**
    * ゴール宣言を立てる／外す。**地図の顔ぶれが変わるので `recompute` を通す。**
    *
@@ -2137,6 +2149,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       onDelete: (id) => void removeNode(id),
       onColor: (id, color) => void setColor(id, color),
       onGoal: (id, on) => void setGoal(id, on),
+      onDue: (id, due) => void setDue(id, due),
       onMenu: openMenu,
       onMore: (open) => {
         state.insp.moreOpen = open;
