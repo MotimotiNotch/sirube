@@ -17,25 +17,34 @@ sed -i 's|^targets = .*|targets = ["x86_64-unknown-linux-gnu"]|' rust-toolchain.
 bun install --frozen-lockfile
 bunx tauri build --bundles appimage
 
-# 同梱された libwayland を外して詰め直す（2026-09-28）。
+# 同梱の libwayland-client が入っていないことを確かめる（2026-09-28 → 09-29 改め）。
 #
-# 22.04 から持ってきた libwayland-client 等が同梱されると、新しい Mesa の入った
+# 22.04 から持ってきた libwayland-client が同梱されると、新しい Mesa の入った
 # ディストロ（Fedora 44 で確認。Bazzite もこの系統）で起動直後に
 # `Could not create default EGL display: EGL_BAD_PARAMETER. Aborting...` で落ちる。
-# Mesa の EGL は自分と同じ世代の libwayland を前提にしているのに、AppImage の方が
-# 先に読まれて古いものが当たるため。外すとホストのものが使われ、起動して描ける
-# ことを fedora:44 + Xvfb の画面で確かめてある。
+# Mesa の EGL が、自分より古い同梱の libwayland-client を掴むため。
 #
-# 外しても困らない: Wayland のデスクトップ（KDE・GNOME）なら libwayland は必ず
-# 入っている。X11 だけの環境でも、GTK が libwayland-client を読むので大抵ある。
+# 09-28 は焼いたあとに libwayland-* を全部外して詰め直していた。09-29 に Tauri CLI
+# 2.12.0（tauri-bundler 2.10.0、tauri#16062）へ上げ、本家が client を同梱しなく
+# なったので、外す工程はやめた。手を加えない AppImage が fedora:44 + Xvfb で
+# WebView まで描けることを画面で確かめてある。
+#
+# **-cursor / -egl / -server は外さない。** 09-29 に「保険」として外したら、
+# libwayland-server の無いホスト（fedora:44 のコンテナ）で
+# `libwayland-server.so.0: cannot open shared object file` になり起動すらしなかった。
+# 09-28 の「Wayland のデスクトップなら必ずある」は server については言い過ぎで、
+# 本家が残しているものは残す。
+#
+# CLI を下げたり linuxdeploy の除外一覧が変わったりして client が戻ってきたら、
+# ここで止める。
 cd src-tauri/target/release/bundle/appimage
 img=$(ls *.AppImage)
 rm -rf squashfs-root
 ./"$img" --appimage-extract >/dev/null
-removed=$(ls squashfs-root/usr/lib/libwayland-*.so* 2>/dev/null | wc -l)
-[ "$removed" -gt 0 ] || { echo "libwayland が同梱されていない（linuxdeploy の挙動が変わった？）" >&2; exit 1; }
-rm -f squashfs-root/usr/lib/libwayland-*.so*
-echo "libwayland を ${removed} 個外した"
+if ls squashfs-root/usr/lib/libwayland-client.so* >/dev/null 2>&1; then
+  echo "libwayland-client が同梱されている（Tauri CLI が 2.12.0 未満？ 新しい Mesa で EGL_BAD_PARAMETER になる）" >&2
+  exit 1
+fi
 
 # 日本語入力のモジュールを選ぶ起動フックを足す（中身と理由は apprun-ime.sh）。
 # linuxdeploy の AppRun は apprun-hooks/ を丸ごと読むのではなく、フックごとに
