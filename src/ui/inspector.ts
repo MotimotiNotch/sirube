@@ -4,7 +4,7 @@
 // 分解こそがこのツールで人間にしかできないことなので、常に手の届く位置に置く。
 
 import { DUE_FORMAT, effectiveDues, inDegree, progress, resolveState, type ReverseIndex } from "../core/engine.ts";
-import { isEndlessRoot, isGoal } from "../core/goals.ts";
+import { isAutoGoal, isEndlessRoot, isGoal } from "../core/goals.ts";
 import { GOAL_COLORS, isGoalColor, type GoalColor, type Graph, type NodeState } from "../core/model.ts";
 import { nodeCreatedAt } from "../core/ulid.ts";
 import { COLOR_LABEL, formatDate, formatDateTime, h, iconSpan, stateBadge, stateDot } from "./dom.ts";
@@ -245,7 +245,7 @@ export function renderInspector(
     // ——外しても次の読み込みでゴールに戻るので効かないボタンになる、という理由
     // だった。`goal: false` を降格として保存するようにしたので、その前提が消えた。
     // 終わらない根（`哲学を体現する`）が地図の段を1つ食っていたのを外すための口。
-    const auto = inDegree(selectedId, rev) === 0;
+    const auto = isAutoGoal(graph, selectedId, rev);
     const on = isGoal(graph, selectedId, rev);
     const sec = h("div", { class: "insp-section" });
     const head = h("h4");
@@ -261,7 +261,11 @@ export function renderInspector(
     // ——根を外すと、その下に `goal: true` が1つも無い場合、一帯が地図から消える。
     const note = on
       ? auto
-        ? "どこからも要求されていないので、書かなくてもゴールです。外すと地図から消えます——下に地図へ出したいものがあるなら、先にそちらを出しておいてください。"
+        ? inDegree(selectedId, rev) > 0
+          ? // 輪の代表（`isAutoGoal`）。「どこからも要求されていない」と書くと、
+            // 画面に見えている輪の線と食い違う。
+            "輪の外からは要求されていないので、輪の中で先に作ったこれがゴールに出ています。輪は分解が足りない合図です——割ると根が自然に決まります。"
+          : "どこからも要求されていないので、書かなくてもゴールです。外すと地図から消えます——下に地図へ出したいものがあるなら、先にそちらを出しておいてください。"
         : "地図に出ています。ここまでの道は畳まれ、間の件数だけが線に残ります。"
       : auto
         ? "地図から外してあります。構造はそのままで、地図と入口に出ないだけです。"

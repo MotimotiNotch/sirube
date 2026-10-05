@@ -6,7 +6,8 @@
 
 import { describe, expect, test } from "bun:test";
 import { buildReverseIndex, resolveState } from "./engine.ts";
-import { betweenKey, enclosingGoal, goalIds, goalLayer, goalRoots, isEndlessRoot, isGoal, mapSeeds } from "./goals.ts";
+import { betweenKey, enclosingGoal, goalIds, goalLayer, goalRoots, isAutoGoal, isEndlessRoot, isGoal, mapSeeds } from "./goals.ts";
+import { pathFromRoot } from "./search.ts";
 import { parseDsl } from "./dsl.ts";
 import { newGraph, type Graph } from "./model.ts";
 
@@ -91,6 +92,56 @@ describe("ゴールの判定", () => {
 
     graph.nodes["終わらない根"]!.goal = false;
     expect(goalRoots(goalLayer(graph, rev(graph))).sort()).toEqual(["A", "B"]);
+  });
+});
+
+describe("輪に巻き込まれた目的（2026-10-05）", () => {
+  // 実 vault の再現。`test` を目的として作り、前提の `test1` から `test` を
+  // 要求させたら、一覧から `test` が消えた。入次数0が1つも残らないため。
+  function looped(): Graph {
+    const graph = g("test -> test1 -> test2, test -> test3, test1 -> test");
+    graph.nodes["test"]!.number = 206;
+    graph.nodes["test1"]!.number = 207;
+    return graph;
+  }
+
+  test("外から入られない輪は、先に作った1つだけがゴールに残る", () => {
+    const graph = looped();
+    expect(goalIds(graph, rev(graph))).toEqual(["test"]);
+    // 番号の向きを逆にすると代表も入れ替わる——名前で選んでいないことの対照。
+    graph.nodes["test"]!.number = 300;
+    expect(goalIds(graph, rev(graph))).toEqual(["test1"]);
+  });
+
+  test("外から要求されている輪は根にならない（陰性対照）", () => {
+    const graph = looped();
+    graph.nodes["上"] = { ...graph.nodes["test3"]!, id: "上", name: "上", requires: ["test1"] };
+    expect(goalIds(graph, rev(graph))).toEqual(["上"]);
+  });
+
+  test("輪の代表は外せる。外した印は代表にだけ書ける", () => {
+    const graph = looped();
+    expect(isAutoGoal(graph, "test", rev(graph))).toBe(true);
+    expect(isAutoGoal(graph, "test1", rev(graph))).toBe(false);
+    graph.nodes["test"]!.goal = false;
+    expect(goalIds(graph, rev(graph))).toEqual([]);
+    expect(isEndlessRoot(graph, "test", rev(graph))).toBe(true);
+    expect(isEndlessRoot(graph, "test")).toBe(true);
+  });
+
+  test("輪の中のノードのパンくずは代表から始まる", () => {
+    const graph = looped();
+    expect(pathFromRoot(graph, rev(graph), "test2")).toEqual(["test", "test1"]);
+    expect(pathFromRoot(graph, rev(graph), "test")).toEqual([]);
+  });
+
+  test("同じ構造なら逆引きを作り直しても答えが同じ（キャッシュが構造にしか依存しない）", () => {
+    const graph = looped();
+    const r = rev(graph);
+    expect(isGoal(graph, "test", r)).toBe(true);
+    graph.nodes["test"]!.goal = false; // 宣言だけ変える。逆引きは作り直さない
+    expect(isGoal(graph, "test", r)).toBe(false);
+    expect(goalIds(graph, r)).toEqual(goalIds(graph, rev(graph)));
   });
 });
 
@@ -184,8 +235,13 @@ describe("包んでいるゴール", () => {
     expect(enclosingGoal(graph, "末端", rev(graph))).toBe("中");
   });
 
-  test("上にゴールが無ければ undefined（輪の中）", () => {
+  test("上にゴールが無ければ undefined（輪の代表を外したとき）", () => {
+    // 外から入られない輪は代表がゴールになる（2026-10-05）。それを外すと
+    // 上に何も残らない。ここで無限に上らないことを固定する。
     const graph = g("A -> B -> A");
+    expect(enclosingGoal(graph, "B", rev(graph))).toBe("A");
+    graph.nodes["A"]!.goal = false;
     expect(enclosingGoal(graph, "A", rev(graph))).toBeUndefined();
+    expect(enclosingGoal(graph, "B", rev(graph))).toBeUndefined();
   });
 });

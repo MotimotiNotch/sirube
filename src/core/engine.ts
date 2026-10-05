@@ -76,7 +76,18 @@ export function findContainsCycles(g: Graph): string[][] {
 /** 辿るエッジを差し替えられる Tarjan。2種類のエッジで同じ実装を使う——
  *  片方だけ直して、もう片方が古い判定のまま残るのを防ぐ。 */
 function findCyclesOn(g: Graph, edgesOf: (n: Graph["nodes"][string]) => readonly string[]): string[][] {
-  // Tarjan の強連結成分分解。
+  return stronglyConnected(g, edgesOf).filter((component) => {
+    if (component.length > 1) return true;
+    const self = g.nodes[component[0]!];
+    return self ? edgesOf(self).includes(component[0]!) : false;
+  });
+}
+
+/** Tarjan の強連結成分分解。**輪でない成分（ノード1つ）も含めて全部返す。**
+ *
+ * 循環の検出（上）と、輪ごと目的が消えないための根の判定（`goals.ts` の
+ * `isAutoGoal`）が同じ分解を使う。 */
+export function stronglyConnected(g: Graph, edgesOf: (n: Graph["nodes"][string]) => readonly string[]): string[][] {
   let index = 0;
   const indices = new Map<string, number>();
   const lowlink = new Map<string, number>();
@@ -110,9 +121,7 @@ function findCyclesOn(g: Graph, edgesOf: (n: Graph["nodes"][string]) => readonly
         component.push(w);
         if (w === v) break;
       }
-      const self = g.nodes[v];
-      const selfLoop = component.length === 1 && (self ? edgesOf(self).includes(v) : false);
-      if (component.length > 1 || selfLoop) result.push(component.reverse());
+      result.push(component.reverse());
     }
   };
 

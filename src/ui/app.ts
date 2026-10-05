@@ -5,7 +5,7 @@
 
 import { analyzeCycles, buildReverseIndex, canUndo, findShortcuts, hasChildren, inDegree, progress, resolveState, type CycleInfo, type ReverseIndex, type TogglePlan, type ToggleUndo } from "../core/engine.ts";
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
-import { enclosingGoal, goalLayer, isGoal, mapSeeds, type GoalLayer } from "../core/goals.ts";
+import { enclosingGoal, goalLayer, isAutoGoal, isGoal, mapSeeds, type GoalLayer } from "../core/goals.ts";
 import { parseDsl } from "../core/dsl.ts";
 import { normalizeForDuplicateCheck, planReconcile, summarize, type ReconcilePlan } from "../core/reconcile.ts";
 import {
@@ -822,10 +822,11 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     const node = state.graph.nodes[id];
     if (!node) return;
     if (on) node.goal = true;
-    // 外すときに `false` を書くのは、**書かないと外れない場所だけ**（入次数0）。
-    // それ以外は未指定へ戻す。全ファイルに `goal: false` が散ると、読む人には
-    // 「宣言した結果ゴールでない」に見えて、タグのように使えると誤解される。
-    else if (inDegree(id, state.rev) === 0) node.goal = false;
+    // 外すときに `false` を書くのは、**書かないと外れない場所だけ**（入次数0と、
+    // 外から入られない輪の代表＝`isAutoGoal`）。それ以外は未指定へ戻す。全ファイルに
+    // `goal: false` が散ると、読む人には「宣言した結果ゴールでない」に見えて、
+    // タグのように使えると誤解される。
+    else if (isAutoGoal(state.graph, id, state.rev)) node.goal = false;
     else delete node.goal;
     await store.persist(state.graph, [id]);
     recompute();

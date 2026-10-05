@@ -22,6 +22,7 @@ import {
   type ReverseIndex,
 } from "./engine.ts";
 import { effectiveDues, type EffectiveDue } from "./engine.ts";
+import { isAutoGoal } from "./goals.ts";
 import type { Graph, NodeState } from "./model.ts";
 
 /** 行に載せる期限。**達成済みは伝わってこない**ので自分の期限のまま（`effectiveDues`）。 */
@@ -99,7 +100,8 @@ export function ancestorRoots(g: Graph, id: string, rev: ReverseIndex, seen = ne
 }
 
 /**
- * 目的（入次数0）から `id` までの経路を1本返す。**`id` 自身は含まない。**
+ * 目的（`isAutoGoal`＝入次数0か、外から入られない輪の代表）から `id` までの
+ * 経路を1本返す。**`id` 自身は含まない。**
  *
  * 一覧から Chain View へ飛ぶと、それが目的の中のどこなのか画面のどこにも
  * 出ていなかった（のっち報告 2026-09-03）。パンくずに積むために使う。
@@ -109,7 +111,8 @@ export function ancestorRoots(g: Graph, id: string, rev: ReverseIndex, seen = ne
  * 一覧から飛ぶたびに違う道が出ると、同じノードが毎回違う場所にあるように
  * 見えるので、選び方は決定的にしてある。
  *
- * `id` 自身が目的なら空を返す。輪の中にいて目的へ辿り着けないときも空。
+ * `id` 自身が目的なら空を返す。輪の外から入られている輪の中では、輪の外の
+ * 目的まで上がる（輪の中は `seen` で刈る）。
  */
 export function pathFromRoot(g: Graph, rev: ReverseIndex, id: string): string[] {
   if (!g.nodes[id]) return [];
@@ -118,7 +121,7 @@ export function pathFromRoot(g: Graph, rev: ReverseIndex, id: string): string[] 
       .filter((pid) => g.nodes[pid] !== undefined)
       .sort((a, b) => g.nodes[a]!.name.localeCompare(g.nodes[b]!.name, "ja"));
 
-  if (parentsOf(id).length === 0) return [];
+  if (isAutoGoal(g, id, rev)) return [];
 
   /** 見つけた親 → そこから `id` へ向かう1つ下。目的に届いたらここを下って組む。 */
   const down = new Map<string, string>();
@@ -132,7 +135,7 @@ export function pathFromRoot(g: Graph, rev: ReverseIndex, id: string): string[] 
         if (seen.has(parent)) continue; // 輪はここで止まる
         seen.add(parent);
         down.set(parent, cur);
-        if (parentsOf(parent).length === 0) {
+        if (isAutoGoal(g, parent, rev)) {
           const path: string[] = [];
           for (let w: string | undefined = parent; w !== undefined && w !== id; w = down.get(w)) path.push(w);
           return path;

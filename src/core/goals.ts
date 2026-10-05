@@ -20,7 +20,7 @@
 // 「判定が3箇所に散ると、片方だけ直したときに別のことを言い始める」（2026-09-02）
 // を繰り返さないための境界。
 
-import { buildReverseIndex, inDegree, type ReverseIndex } from "./engine.ts";
+import { buildReverseIndex, inDegree, stronglyConnected, type ReverseIndex } from "./engine.ts";
 import type { Graph, Node } from "./model.ts";
 
 /**
@@ -57,7 +57,50 @@ export function isGoal(g: Graph, id: string, rev: ReverseIndex): boolean {
   const node = g.nodes[id];
   if (!node) return false;
   if (node.goal === false) return false;
-  return node.goal === true || inDegree(id, rev) === 0;
+  return node.goal === true || isAutoGoal(g, id, rev);
+}
+
+/**
+ * 宣言しなくてもゴールになるか。**入次数0、または外から入られない輪の代表。**
+ *
+ * 入次数0だけで見ていた頃は、**目的を輪に巻き込んだ瞬間に一帯が入口から
+ * 消えた**（2026-10-05、のっち）。`test -> test1 -> test` のように、外からは
+ * 誰も要求していないのに、輪の中で互いに要求し合うので入次数0が1つも残らない。
+ * 輪は「分解が足りない信号」として**見せる**方針なのに、見せる入口から消える。
+ *
+ * 一般化すると「強連結成分のうち、外から入る辺が無いもの」が根。入次数0の
+ * ノードは要素1つのその成分なので、判定は1本で済む。輪の成分からは
+ * **代表を1つだけ**出す——全員を出すと、大きな輪で一覧が埋まる。代表は先に
+ * 作った方（`number` が小さい方、無ければ id = ULID の順）。輪を作るのは
+ * 後から足した前提の側なので、先に居た方が元の目的のはず。
+ *
+ * 分解は構造だけで決まるので、逆引きごとに1回だけ取って持ち回る（逆引きは
+ * 構造が変わるたびに作り直される）。`goal` の宣言はここに入れない——宣言を
+ * 変えても作り直さない逆引きがあるため。
+ */
+export function isAutoGoal(g: Graph, id: string, rev: ReverseIndex): boolean {
+  let roots = autoRootCache.get(rev);
+  if (!roots) {
+    roots = autoRoots(g, rev);
+    autoRootCache.set(rev, roots);
+  }
+  return roots.has(id);
+}
+
+const autoRootCache = new WeakMap<ReverseIndex, Set<string>>();
+
+function autoRoots(g: Graph, rev: ReverseIndex): Set<string> {
+  const roots = new Set<string>();
+  const order = (a: string, b: string): number =>
+    (g.nodes[a]!.number ?? Infinity) - (g.nodes[b]!.number ?? Infinity) || a.localeCompare(b);
+  for (const component of stronglyConnected(g, (n) => [...n.requires, ...n.contains])) {
+    const members = new Set(component);
+    const entered = component.some((id) =>
+      [...(rev.requiredBy.get(id) ?? []), ...(rev.containedBy.get(id) ?? [])].some((p) => g.nodes[p] && !members.has(p)),
+    );
+    if (!entered) roots.add([...component].sort(order)[0]!);
+  }
+  return roots;
 }
 
 /**
@@ -75,15 +118,15 @@ export function isGoal(g: Graph, id: string, rev: ReverseIndex): boolean {
  * 達成数と全体の数を別々に並べる（`達成 36 件 ／ 全 79 件`）。
  *
  * 中腹の終わらないもの（`絵を描き続ける` 等）は拾わない。`goal: false` は
- * 入次数0でしか書かない決まり（`setGoal`）なので、中腹には手がかりが無い。
+ * 自動の根（`isAutoGoal`）にしか書かない決まり（`setGoal`）なので、中腹には手がかりが無い。
  *
  * 逆引きを持っていない呼び手（フライアウト）のために `rev` は省ける。
- * 省くと参照を全部舐めて入次数を数える。
+ * 省くとその場で作る。根の判定は `isGoal` と同じ `isAutoGoal` を通す——
+ * 入次数を別に数えると、輪の代表だけ答えが食い違う。
  */
 export function isEndlessRoot(g: Graph, id: string, rev?: ReverseIndex): boolean {
   if (g.nodes[id]?.goal !== false) return false;
-  if (rev) return inDegree(id, rev) === 0;
-  return !Object.values(g.nodes).some((n) => n.requires.includes(id) || n.contains.includes(id));
+  return isAutoGoal(g, id, rev ?? buildReverseIndex(g));
 }
 
 export function goalIds(g: Graph, rev: ReverseIndex): string[] {
