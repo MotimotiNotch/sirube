@@ -12,6 +12,9 @@ import { startApp, type AppOptions, type WindowTarget } from "../ui/app.ts";
 import { toast } from "../ui/dom.ts";
 import { TauriFs } from "../store/tauri-fs.ts";
 import { buildWindowQuery, parseWindowQuery } from "../ui/window-query.ts";
+import { getVersion } from "@tauri-apps/api/app";
+import { formatCrumbs, installCrashCapture } from "../ui/crash.ts";
+import { showCrashNotice } from "./crash-notice.ts";
 
 const VAULT_KEY = "sirube.vaultPath";
 /** 今どの vault を開いているかを、**アプリの外から読める場所**に置くファイル。
@@ -106,6 +109,27 @@ function showFatal(message: string): void {
 }
 
 const query = parseWindowQuery(location.search);
+
+// 異常終了の記録（2026-10-05）。**何より先に張る**——vault を開く途中で落ちても拾うため。
+// 書き出しは本体（`crash.rs`）。外へは送らない。
+const version = await getVersion().catch(() => undefined);
+const crumbs = installCrashCapture({
+  window: query.sub ? "別窓" : "本窓",
+  version,
+  sink: (_report, text) => {
+    void invoke("record_crash", { body: text }).catch(() => {});
+  },
+});
+// 固まったかの見張りへの生存通知。本窓だけ（本体も本窓しか見ていない）。
+// 直前の操作は変わったときだけ載せる——2秒おきに20件を毎回送る理由が無い。
+if (!query.sub) {
+  let sent = -1;
+  setInterval(() => {
+    const changed = crumbs.revision !== sent;
+    sent = crumbs.revision;
+    void invoke("heartbeat", { crumbs: changed ? formatCrumbs(crumbs.list()) : null }).catch(() => {});
+  }, 2000);
+}
 // サブ窓は本窓から vault を受け取る。localStorage からは読まない——本窓が後で
 // 切り替えても、この窓は開いたときのフォルダのまま（切り替えたら本窓が閉じる）。
 // 掲示板も本窓だけが書く。
@@ -128,6 +152,12 @@ if (!vault) {
       : { vault: { path: vault, switchVault } };
     options.openWindow = (target) => openWindow(target, vault);
     const app = await startApp(fs, options);
+
+    // 前回までの記録を出す。本窓だけ（別窓で出すと、同じものを取り合う）。
+    if (!query.sub) {
+      const reports = await invoke<{ name: string; body: string }[]>("take_crash_reports").catch(() => []);
+      if (reports.length > 0) showCrashNotice(reports);
+    }
 
     // 外部からの変更（エディタ・Obsidian・エージェント・git のマージ）を拾って
     // 読み直す。デバウンス付きなので git checkout のような一斉変更でも

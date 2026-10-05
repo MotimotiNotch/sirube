@@ -1245,6 +1245,42 @@ body.no-inspector #inspector-resizer {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
 
+/* 異常終了の記録 -------------------------------------------------------- */
+/* 起動直後に右下へ1回だけ出す（src/tauri/crash-notice.ts）。作業の邪魔をしない
+   位置に置き、トーストより上に重ねる。中身は開発者向けなので既定では畳む。 */
+.crash-notice {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--st-cyclic);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  z-index: 70;
+}
+.crash-notice-title { font-weight: 600; color: var(--st-cyclic); }
+.crash-notice-lead { margin: 0; font-size: 12px; color: var(--fg-muted); line-height: 1.6; }
+.crash-notice-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.crash-notice-body {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  min-height: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--bg-sunken);
+  border-radius: 6px;
+  user-select: text;
+}
+
 /* 付箋の帯 ------------------------------------------------------------- */
 /* 一覧の行。カードの左の縁を色で塗る。複数の目的に属するノードは、その数だけ
    縦に割る（背景の linear-gradient を list-view.ts が組み立てる）。 */

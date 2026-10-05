@@ -8,6 +8,8 @@
 // Bun compile 版はランタイム本体だけで 84MB あり、それが配布時の AV スキャン待ちを
 // 悪化させていた。
 
+mod crash;
+
 use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 
@@ -38,6 +40,12 @@ pub fn run() {
     // 初回起動時に vault フォルダを選んでもらうため。
     .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
+      // 異常終了の記録（2026-10-05）。リリース版は何も書いていなかったので、落ちたときに
+      // 手がかりがゼロだった。ログのプラグインと違ってリリース版でも常に入れる。
+      let version = app.package_info().version.to_string();
+      crash::init(app.handle());
+      crash::install_panic_hook(version.clone());
+      crash::spawn_watchdog(version);
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
@@ -53,8 +61,11 @@ pub fn run() {
     // 次に開いたとき何も覚えていない窓で作業を続けることになる。
     .on_window_event(|window, event| {
       if window.label() == "main" {
-        if let tauri::WindowEvent::Destroyed = event {
-          window.app_handle().exit(0);
+        match event {
+          tauri::WindowEvent::Destroyed => window.app_handle().exit(0),
+          // 固まったかの見張りは、本窓に焦点があるときだけ（`crash::Watch::focused`）。
+          tauri::WindowEvent::Focused(focused) => crash::set_focused(*focused),
+          _ => {}
         }
       }
     })
@@ -77,7 +88,12 @@ pub fn run() {
       #[cfg(not(target_os = "linux"))]
       let _ = webview;
     })
-    .invoke_handler(tauri::generate_handler![allow_vault])
+    .invoke_handler(tauri::generate_handler![
+      allow_vault,
+      crash::heartbeat,
+      crash::record_crash,
+      crash::take_crash_reports
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
