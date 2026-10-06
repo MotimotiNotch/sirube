@@ -46,6 +46,11 @@ const accent = process.argv.slice(2).find((a) => !a.startsWith("--")) ?? "#d98b8
 // (140,179,217) で対称になり、上下に並べても片方だけ浮かない。
 const baseColor = "#8cb3d9";
 
+// 2026-10-06 の改稿（作者が Inkscape で直した g2.svg）: 線を約半分に細くし、
+// 塗りの2つ（青い円と点）は半透明にして同色の縁で輪郭を残す。左上の円には
+// 半径半分の同心円を足す。座標と色はそのまま。
+const FILL_OPACITY = 0.48;
+
 // 小サイズ用の簡略版。16〜24px では円3つ＋破線が団子になって読めない
 // （2026-08-31 に並べて確認）。要素を減らし、線を太くし、破線を2本に減らす。
 // 意味の核（実線で辿る → 破線の先に点）は落とさない。
@@ -83,14 +88,15 @@ ${plateRect}  <g stroke="currentColor" stroke-linecap="round">
     })()
   : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB} ${VB}" width="${VB}" height="${VB}" color="#1c1c1a" fill="none" role="img" aria-label="Sirube">
 ${plateRect}  <g stroke="currentColor" stroke-linecap="round">
-    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke-width="2.3"/>
-    <line x1="${x3}" y1="${y3}" x2="${x4}" y2="${y4}" stroke-width="2.3"/>
-    <line x1="${x5}" y1="${y5}" x2="${x6}" y2="${y6}" stroke-width="2.3" stroke-dasharray="4.6 4.1"/>
-    <circle cx="${big.x}" cy="${big.y}" r="${big.r}" fill="${baseColor}" stroke="${baseColor}" stroke-width="2.8"/>
-    <circle cx="${mid.x}" cy="${mid.y}" r="${mid.r}" stroke-width="2.6"/>
-    <circle cx="${small.x}" cy="${small.y}" r="${small.r}" stroke-width="2.5"/>
+    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke-width="1.13"/>
+    <line x1="${x3}" y1="${y3}" x2="${x4}" y2="${y4}" stroke-width="1.13"/>
+    <line x1="${x5}" y1="${y5}" x2="${x6}" y2="${y6}" stroke-width="1.13" stroke-dasharray="2.27 2.02"/>
+    <circle cx="${big.x}" cy="${big.y}" r="${big.r}" fill="${baseColor}" fill-opacity="${FILL_OPACITY}" stroke="${baseColor}" stroke-width="2.8"/>
+    <circle cx="${mid.x}" cy="${mid.y}" r="${mid.r}" stroke-width="1.09"/>
+    <circle cx="${small.x}" cy="${small.y}" r="${small.r}" stroke-width="0.99"/>
+    <circle cx="${small.x}" cy="${small.y}" r="${small.r / 2}" stroke-width="0.49"/>
   </g>
-  <circle cx="${dot.x}" cy="${dot.y}" r="${dot.r}" fill="${accent}"/>
+  <circle cx="${dot.x}" cy="${dot.y}" r="${dot.r}" fill="${accent}" fill-opacity="${FILL_OPACITY}" stroke="${accent}"/>
 </svg>
 `;
 
