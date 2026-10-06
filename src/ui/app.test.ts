@@ -2955,3 +2955,57 @@ describe("別窓（2026-09-28）", () => {
     expect(text("modal")).toContain("最初の窓から");
   });
 });
+
+const { setThemePref, readThemePref } = await import("./theme.ts");
+
+describe("ライトとダークの切り替え（2026-10-06）", () => {
+  const themeItems = (): HTMLElement[] => Array.from(document.querySelectorAll(".ctx-menu .ctx-item")) as HTMLElement[];
+
+  beforeEach(async () => {
+    setThemePref("system"); // モジュールが今の設定を覚えているので、テストごとに戻す
+    document.body.innerHTML = HTML;
+    localStorage.clear();
+    await startApp(sampleFs());
+  });
+
+  test("ヘッダーのボタンで3択が出て、今の設定に印が付いている", () => {
+    expect($("theme-btn").classList.contains("hidden")).toBe(false);
+    expect($("theme-btn").title).toBe("表示: OS に合わせる");
+    $("theme-btn").click();
+    const items = themeItems();
+    expect(items.map((b) => b.textContent)).toEqual(["OS に合わせる", "ライト", "ダーク"]);
+    expect(items.map((b) => b.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+    expect(items[0]!.querySelector(".ctx-check")).toBeTruthy();
+    expect(items[2]!.querySelector(".ctx-check")).toBeNull();
+  });
+
+  test("ダークを選ぶと data-theme が dark になり、覚えておく", () => {
+    $("theme-btn").click();
+    themeItems()[2]!.click();
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(readThemePref()).toBe("dark");
+    expect($("theme-btn").title).toBe("表示: ダーク");
+    expect(document.querySelector(".ctx-menu")).toBeNull(); // 選んだら閉じる
+  });
+
+  test("OS に合わせるに戻すと、保存した値を消す", () => {
+    setThemePref("light");
+    expect(localStorage.getItem("sirube.theme")).toBe("light"); // 陽性対照
+    $("theme-btn").click();
+    themeItems()[0]!.click();
+    expect(localStorage.getItem("sirube.theme")).toBeNull();
+    expect(readThemePref()).toBe("system");
+  });
+
+  test("サブ窓には出さない（設定を書くのは本窓だけ）", async () => {
+    document.body.innerHTML = HTML;
+    await startApp(sampleFs(), { sub: {} });
+    expect($("theme-btn").classList.contains("hidden")).toBe(true);
+  });
+
+  test("色の値の束はダーク用に1か所だけ（OS の設定も theme.ts が解決する）", async () => {
+    const css = await Bun.file("src/ui/style.css").text();
+    expect(css).toContain(':root[data-theme="dark"]');
+    expect(css).not.toMatch(/@media\s*\(prefers-color-scheme[^)]*\)\s*\{/); // コメント中の言及は数えない
+  });
+});

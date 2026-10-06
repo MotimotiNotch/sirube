@@ -15,6 +15,7 @@ import { buildWindowQuery, parseWindowQuery } from "../ui/window-query.ts";
 import { getVersion } from "@tauri-apps/api/app";
 import { formatCrumbs, installCrashCapture } from "../ui/crash.ts";
 import { showCrashNotice } from "./crash-notice.ts";
+import { initTheme } from "../ui/theme.ts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { routeExternalLinks } from "../ui/external-links.ts";
 
@@ -110,6 +111,7 @@ function showFatal(message: string): void {
   document.body.append(box);
 }
 
+initTheme(); // vault を読む前に（読み込み中ずっとライトで光らないように）
 routeExternalLinks(openUrl); // メモやマニュアルのリンクは既定のブラウザで
 
 const query = parseWindowQuery(location.search);

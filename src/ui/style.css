@@ -11,7 +11,7 @@
  * 背負わせず、形の違いが残っているかを確かめること。 */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   --bg: #fbfbfa;
   --bg-panel: #ffffff;
@@ -48,33 +48,36 @@
     "Noto Sans JP", "Yu Gothic UI", sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #16171a;
-    --bg-panel: #1d1f23;
-    --bg-sunken: #121316;
-    --border: #2b2e34;
-    --border-strong: #3c4048;
-    --fg: #e6e6e3;
-    --fg-muted: #9b9b95;
-    --fg-faint: #6f6f6a;
+/* ダーク。どちらを当てるかは theme.ts が決めて `data-theme` に書く（OS に合わせる
+   ときも同じ。`@media (prefers-color-scheme)` で分けていないのは、値の束を
+   1か所に保つため）。 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
-    --st-satisfied: #6cc47e;
-    --st-satisfied-bg: #1c2a20;
-    --st-actionable: #6aa9f0;
-    --st-actionable-bg: #17222f;
-    --st-blocked: #7d7d77;
-    --st-blocked-bg: #1f2125;
-    --st-cyclic: #ddaa55;
-    --st-cyclic-bg: #2c2418;
+  --bg: #16171a;
+  --bg-panel: #1d1f23;
+  --bg-sunken: #121316;
+  --border: #2b2e34;
+  --border-strong: #3c4048;
+  --fg: #e6e6e3;
+  --fg-muted: #9b9b95;
+  --fg-faint: #6f6f6a;
 
-    --tag-yellow: #d4bc5f;
-    --tag-orange: #d19560;
-    --tag-pink: #d18fa3;
-    --tag-purple: #a494cc;
-    --tag-blue: #82abd0;
-    --tag-green: #85b581;
-  }
+  --st-satisfied: #6cc47e;
+  --st-satisfied-bg: #1c2a20;
+  --st-actionable: #6aa9f0;
+  --st-actionable-bg: #17222f;
+  --st-blocked: #7d7d77;
+  --st-blocked-bg: #1f2125;
+  --st-cyclic: #ddaa55;
+  --st-cyclic-bg: #2c2418;
+
+  --tag-yellow: #d4bc5f;
+  --tag-orange: #d19560;
+  --tag-pink: #d18fa3;
+  --tag-purple: #a494cc;
+  --tag-blue: #82abd0;
+  --tag-green: #85b581;
 }
 
 * { box-sizing: border-box; }
@@ -159,6 +162,8 @@ button { font: inherit; color: inherit; }
   white-space: nowrap;
 }
 .btn:hover { background: var(--bg-sunken); }
+.btn.icon-only { padding: 6px 8px; color: var(--fg-muted); }
+.btn.icon-only:hover { color: var(--fg); }
 .btn.primary {
   background: var(--st-actionable);
   border-color: var(--st-actionable);
@@ -930,6 +935,8 @@ body.no-inspector #inspector-resizer {
   cursor: pointer;
 }
 .ctx-item .icon { color: var(--fg-faint); flex: none; }
+.ctx-item .ctx-check { margin-left: auto; display: inline-flex; }
+.ctx-item .ctx-check .icon { color: var(--fg-muted); }
 .ctx-item:hover { background: var(--bg-sunken); }
 /* 外す系。**色だけで区別する**——確認を挟むほどではないが、隣の項目と
    同じ顔で並ぶと押し間違える。色は `.btn.danger` と同じ値にしてある

@@ -23,6 +23,7 @@ import { clear, el, h, iconSpan, stateDot, toast } from "./dom.ts";
 import { createTutorial, readTourDone, type Tutorial } from "./tutorial.ts";
 import { hideFlyout } from "./flyout.ts";
 import { closeContextMenu, openContextMenu, type MenuItem, type MenuTarget } from "./context-menu.ts";
+import { currentThemePref, setThemePref, type ThemePref } from "./theme.ts";
 import { renderGraph } from "./graph-view.ts";
 import { resetViewport } from "./graph-viewport.ts";
 import { renderInspector } from "./inspector.ts";
@@ -2192,6 +2193,47 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     },
     (message) => toast(message),
   );
+  /**
+   * ライトとダークの切り替え（2026-10-06）。押すと3択のメニューが出る。
+   *
+   * 押すたびに順に回す形にしなかったのは、3つ目があるから——「OS に合わせる」の
+   * 次がライトかダークかは、押してみるまで分からない。アイコンが今の設定を示し、
+   * 選択肢は全部メニューに並べる。**サブ窓には出さない**（設定を書くのは本窓だけ、
+   * `AppOptions.sub`）。サブ窓は本窓での切り替えに `storage` イベントで追随する。
+   */
+  const THEME_CHOICES: { pref: ThemePref; label: string; icon: "monitor" | "sun" | "moon" }[] = [
+    { pref: "system", label: "OS に合わせる", icon: "monitor" },
+    { pref: "light", label: "ライト", icon: "sun" },
+    { pref: "dark", label: "ダーク", icon: "moon" },
+  ];
+  const themeBtn = el<HTMLButtonElement>("theme-btn");
+  const renderThemeBtn = (): void => {
+    const choice = THEME_CHOICES.find((c) => c.pref === currentThemePref()) ?? THEME_CHOICES[0]!;
+    themeBtn.replaceChildren(iconSpan(choice.icon, 15));
+    themeBtn.title = `表示: ${choice.label}`;
+    themeBtn.setAttribute("aria-label", themeBtn.title);
+  };
+  if (persistent) {
+    themeBtn.classList.remove("hidden");
+    renderThemeBtn();
+    themeBtn.addEventListener("click", () => {
+      const r = themeBtn.getBoundingClientRect();
+      openContextMenu(
+        r.left,
+        r.bottom + 4,
+        THEME_CHOICES.map((c) => ({
+          label: c.label,
+          icon: c.icon,
+          checked: c.pref === currentThemePref(),
+          onSelect: () => {
+            setThemePref(c.pref);
+            renderThemeBtn();
+          },
+        })),
+      );
+    });
+  }
+
   // 「使い方」はマニュアルを開く（2026-09-28）。チュートリアルはマニュアルの先頭から。
   el<HTMLButtonElement>("tour-btn").addEventListener("click", () => {
     state.mode = "manual";

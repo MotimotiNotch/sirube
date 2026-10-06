@@ -30,6 +30,9 @@ export interface MenuItem {
   icon?: IconName;
   /** 押すと消える・外れる系。色で区別する。 */
   danger?: boolean;
+  /** 選択肢の中から1つを選ぶメニュー（表示の切り替え）で、今選ばれているもの。
+   *  `undefined` なら普通の項目。 */
+  checked?: boolean;
   onSelect(): void;
 }
 
@@ -57,9 +60,16 @@ export function openContextMenu(x: number, y: number, items: MenuItem[]): void {
 
   const menu = h("div", { class: "ctx-menu", role: "menu" });
   for (const item of items) {
-    const btn = h("button", { class: `ctx-item${item.danger ? " danger" : ""}`, type: "button", role: "menuitem" });
+    const radio = item.checked !== undefined;
+    const btn = h("button", {
+      class: `ctx-item${item.danger ? " danger" : ""}`,
+      type: "button",
+      role: radio ? "menuitemradio" : "menuitem",
+      ...(radio ? { "aria-checked": String(item.checked) } : {}),
+    });
     if (item.icon) btn.append(iconSpan(item.icon, 13));
     btn.append(h("span", {}, [item.label]));
+    if (item.checked) btn.append(h("span", { class: "ctx-check" }, [iconSpan("check", 13)]));
     btn.addEventListener("click", () => {
       closeContextMenu();
       item.onSelect();
