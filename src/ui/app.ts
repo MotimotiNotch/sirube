@@ -28,9 +28,9 @@ import { renderGraph } from "./graph-view.ts";
 import { resetViewport } from "./graph-viewport.ts";
 import { renderInspector } from "./inspector.ts";
 import { renderList } from "./list-view.ts";
-import { MANUAL_DOC } from "./manual-doc.ts";
+import { MANUAL_DOC, MANUAL_DOC_EN } from "./manual-doc.ts";
 import { renderManual } from "./manual-view.ts";
-import { currentLangPref, m, setLangPref, type LangPref } from "../i18n/index.ts";
+import { currentLang, currentLangPref, m, setLangPref, type LangPref } from "../i18n/index.ts";
 
 interface AppState {
   graph: Graph;
@@ -2017,7 +2017,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     if (state.mode === "manual") {
       // チュートリアルは一覧から始める（最初に押す場所がサイドバーの `+` で、
       // 真ん中がマニュアルのままだと案内の出る画面と合わない）。
-      renderManual(body, MANUAL_DOC, {
+      renderManual(body, currentLang() === "en" ? MANUAL_DOC_EN : MANUAL_DOC, {
         // サブ窓では出さない。チュートリアルは済んだ印を localStorage に書く。
         ...(persistent
           ? {

@@ -20,7 +20,7 @@ export const list: Shape<typeof Ja> = {
   under: (crumb) => `Under ${crumb}`,
   sharedTitle: (n) => `Needed from ${n} places (finishing it moves several forward)`,
   sharedBadge: (n) => `Shared ${n}`,
-  dueFrom: (from) => `Due in time for "${from}"`,
+  dueFrom: (from) => `Due in time for “${from}”`,
   due: "Due date",
   updated: (dateTime) => `Updated ${dateTime}`,
   needs: "Needs",

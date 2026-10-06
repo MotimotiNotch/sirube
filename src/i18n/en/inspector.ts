@@ -9,10 +9,10 @@ export const inspector: Shape<typeof Ja> = {
   numberTitle: "This node's number",
   ownDue: (date) => `. Its own due date is ${date}`,
   dueBadge: (date) => `Due ${date}`,
-  dueFrom: (from, own) => `In time for "${from}"${own}`,
+  dueFrom: (from, own) => `In time for “${from}”${own}`,
   endlessTitle: "This is a never-ending goal (a root taken off the map), so no percentage is shown.",
   endlessProgress: (done, total) => `${done} done / ${total} total`,
-  unmarkDone: "Undo done",
+  unmarkDone: "Mark as not done",
   markDone: "Mark as done",
   breakDown: "Break down",
   cycleTitle: "These nodes are waiting on each other",
@@ -22,7 +22,7 @@ export const inspector: Shape<typeof Ja> = {
   due: "Due date",
   clearDue: "Clear due date",
   dueNoteInherited: (from, date) =>
-    `A due date (${date}) comes down from "${from}". Only set one here if an earlier date has been fixed from outside.`,
+    `A due date (${date}) comes down from “${from}”. Only set one here if an earlier date has been fixed from outside.`,
   dueNoteOwn: "This due date also passes down to what this node needs (prerequisites and parts).",
   dueNoteNone:
     "Only set this when the date is fixed from outside (a filing, a contract renewal, etc.). It also passes down to what this node needs. Sirube won't nag you as it approaches.",
@@ -50,7 +50,7 @@ export const inspector: Shape<typeof Ja> = {
   created: (date) => `Created ${date}`,
   updated: (date) => `Updated ${date}`,
   deleteNode: "Delete this node",
-  deleteConfirm: (name) => `Delete "${name}"? Right after, you can bring it back with "Undo" in the header.`,
+  deleteConfirm: (name) => `Delete “${name}”? Right after, you can bring it back with “Undo” in the header.`,
   nameSep: ", ",
   deleteOrphans: (count, names) =>
     `${count === 1 ? "1 node" : `${count} nodes`} (${names}) will appear in the list as ${count === 1 ? "a goal" : "goals"}.`,
