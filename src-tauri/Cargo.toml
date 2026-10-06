@@ -1,6 +1,6 @@
 [package]
 name = "sirube"
-version = "0.4.0"
+version = "0.5.0"
 description = "目的から「それには何が必要か」を辿ると、末端に今日できることが現れる。半年空けても、道は残っている。"
 authors = ["nocchi"]
 license = "MIT"
