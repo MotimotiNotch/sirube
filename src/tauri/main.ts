@@ -15,6 +15,8 @@ import { buildWindowQuery, parseWindowQuery } from "../ui/window-query.ts";
 import { getVersion } from "@tauri-apps/api/app";
 import { formatCrumbs, installCrashCapture } from "../ui/crash.ts";
 import { showCrashNotice } from "./crash-notice.ts";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { routeExternalLinks } from "../ui/external-links.ts";
 
 const VAULT_KEY = "sirube.vaultPath";
 /** 今どの vault を開いているかを、**アプリの外から読める場所**に置くファイル。
@@ -107,6 +109,8 @@ function showFatal(message: string): void {
   box.textContent = message;
   document.body.append(box);
 }
+
+routeExternalLinks(openUrl); // メモやマニュアルのリンクは既定のブラウザで
 
 const query = parseWindowQuery(location.search);
 

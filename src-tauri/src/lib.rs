@@ -39,6 +39,8 @@ pub fn run() {
     .plugin(tauri_plugin_fs::init())
     // 初回起動時に vault フォルダを選んでもらうため。
     .plugin(tauri_plugin_dialog::init())
+    // メモやマニュアルのリンクを既定のブラウザで開くため（2026-10-06）。
+    .plugin(tauri_plugin_opener::init())
     .setup(|app| {
       // 異常終了の記録（2026-10-05）。リリース版は何も書いていなかったので、落ちたときに
       // 手がかりがゼロだった。ログのプラグインと違ってリリース版でも常に入れる。

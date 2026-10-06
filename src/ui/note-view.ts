@@ -27,8 +27,9 @@ function inline(text: string): (Node | string)[] {
     if (m[1] !== undefined) out.push(h("code", {}, [m[1]]));
     else if (m[2] !== undefined) out.push(h("strong", {}, [m[2]]));
     else if (m[3] !== undefined) {
-      // リンクにはするが、開くのはブラウザ任せ（Tauri の WebView では既定で
-      // 外部ブラウザへ出る）。押せない文字列のままにすると、URL を書く意味が薄い。
+      // リンクにはするが、開く先はここでは決めない。Tauri 版は押された瞬間に
+      // external-links.ts が拾って既定のブラウザへ回す（2026-10-06）。押せない文字列の
+      // ままにすると、URL を書く意味が薄い。
       const a = h("a", { href: m[3], target: "_blank", rel: "noreferrer noopener" }, [m[3]]);
       out.push(a);
     }

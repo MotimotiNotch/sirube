@@ -28,6 +28,12 @@ tauri-plugin-log = "2"
 # になる（2026-08-31 の初回起動で踏んだ）。外部編集の即時反映は必須機能。
 tauri-plugin-fs = { version = "2.5.1", features = ["watch"] }
 tauri-plugin-dialog = "2.7.2"
+# リンクを既定のブラウザで開く（メモの URL・マニュアルの Ko-fi。2026-10-06）。
+# WebView の target="_blank" 任せにすると、どこで開くかが WebView の既定に依存する。
+# 2.6 以降は tauri ^2.12 を要求する。上げると tauri 本体が 2.12 に引き上げられ、JS の
+# @tauri-apps/api 2.11 と食い違ってビルドが止まる。Tauri を 2.12 に上げるとき（vault の
+# チケット）に一緒に上げる。
+tauri-plugin-opener = "~2.5.5"
 
 # Linux だけ: WebView の入力メソッドの設定に触る（lib.rs の on_page_load）。
 # 版は wry が固定しているもの（=2.0.2）に揃える。ずれると別の型になって渡せない。
