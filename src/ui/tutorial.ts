@@ -20,6 +20,7 @@
 import type { Graph } from "../core/model.ts";
 import { resolveState } from "../core/engine.ts";
 import { h } from "./dom.ts";
+import { m } from "../i18n/index.ts";
 
 /** 済んだ（またはスキップした）印。vault ではなくアプリ単位で持つ——別の空の
  *  フォルダを開くたびに出ると、2回目からはただの邪魔になる。 */
@@ -201,7 +202,7 @@ export function createTutorial(deps: TutorialDeps, onFinish: (message: string) =
   const toCleanup = (reason: "finished" | "skipped"): void => {
     cleanupReason = reason;
     if (createdAlive().length === 0) {
-      finish("チュートリアルを終えました。ヘッダーの「使い方」からいつでもやり直せます。");
+      finish(m.tutorial.finished);
       return;
     }
     step = "cleanup";
@@ -299,37 +300,26 @@ export function createTutorial(deps: TutorialDeps, onFinish: (message: string) =
   };
 
   const body = (): string => {
-    const goal = `『${nameOf(goalId)}』`;
-    const prereq = `『${nameOf(prereqId)}』`;
+    const goal = nameOf(goalId);
+    const prereq = nameOf(prereqId);
     const sel = deps.selectedId();
     switch (step) {
       case "goal":
-        return "左の「目的」の ＋ から、達成したいことを1つ作ります。例: 引っ越す（自分の目的をそのまま書いても大丈夫です）";
+        return m.tutorial.goal;
       case "requires":
-        return sel !== goalId
-          ? `まず${goal}を選んでください。`
-          : `右の「分解する」の「前提」タブに、${goal}には何が必要かを書きます。例: 荷造りを終える。前提ができると${goal}は「前提待ち」になります。`;
+        return sel !== goalId ? m.tutorial.selectGoal(goal) : m.tutorial.requires(goal);
       case "contains":
-        return sel !== prereqId
-          ? `次は${prereq}を選んでください。`
-          : `「分解する」の「中身」タブに、${prereq}が何でできているかを書きます。例: 本を箱に詰める、服を箱に詰める（1行に1つ）。前提は揃ったあとも自分の作業が残るもの、中身は全部揃えば終わるもの、という違いです。`;
+        return sel !== prereqId ? m.tutorial.selectPrereq(prereq) : m.tutorial.contains(prereq);
       case "achieve": {
         const l = leaf(true);
-        return l && sel !== l
-          ? `中身の『${nameOf(l)}』を選んでください。`
-          : `右の「達成にする」を押します。中身が全部達成になると${prereq}は自動で達成になり、${goal}が「今やれる」に変わります。`;
+        return l && sel !== l ? m.tutorial.selectLeaf(nameOf(l)) : m.tutorial.achieve(prereq, goal);
       }
       case "delete": {
         const l = leaf(false);
-        return l && sel !== l
-          ? `${goal}が「今やれる」になりました。目的から下ろして、末端から片付ける——使い方はこれだけです。最後に片付けます。中身の『${nameOf(l)}』を選んでください。`
-          : "右の一番下の「その他」→「このノードを削除」で消してみてください。直後ならヘッダーの「戻す」で戻せます。";
+        return l && sel !== l ? m.tutorial.deleteSelect(goal, nameOf(l)) : m.tutorial.delete;
       }
       case "cleanup": {
-        const rest = createdAlive();
-        const names = rest.map((id) => nameOf(id)).join("・");
-        const lead = cleanupReason === "finished" ? `残り ${rest.length} 件` : `チュートリアルで作った ${rest.length} 件`;
-        return `${lead}（${names}）もまとめて削除しますか？ 自分の目的を書いた場合は残してください。`;
+        return m.tutorial.cleanup(cleanupReason === "finished", createdAlive().map((id) => nameOf(id)));
       }
       default:
         return "";
@@ -339,27 +329,27 @@ export function createTutorial(deps: TutorialDeps, onFinish: (message: string) =
   const renderCard = (): void => {
     if (!step) return;
     if (!card) {
-      card = h("div", { class: "tour-card", role: "dialog", "aria-label": "チュートリアル" });
+      card = h("div", { class: "tour-card", role: "dialog", "aria-label": m.tutorial.ariaLabel });
       document.body.append(card);
     }
     const idx = NUMBERED.indexOf(step);
     const head = h("div", { class: "tour-head" }, [
-      h("span", { class: "tour-title" }, ["使い方"]),
-      h("span", { class: "tour-count" }, [idx >= 0 ? `${idx + 1} / ${NUMBERED.length}` : "片付け"]),
+      h("span", { class: "tour-title" }, [m.tutorial.title]),
+      h("span", { class: "tour-count" }, [idx >= 0 ? `${idx + 1} / ${NUMBERED.length}` : m.tutorial.cleanupCount]),
     ]);
     const actions = h("div", { class: "tour-actions" });
     if (step === "cleanup") {
-      const del = h("button", { class: "btn danger", type: "button" }, ["まとめて削除"]);
+      const del = h("button", { class: "btn danger", type: "button" }, [m.tutorial.deleteAll]);
       del.addEventListener("click", async () => {
         const ids = createdAlive();
         await deps.deleteNodes(ids);
-        finish(`${ids.length} 件を削除しました。ヘッダーの「使い方」からいつでもやり直せます。`);
+        finish(m.tutorial.deleted(ids.length));
       });
-      const keep = h("button", { class: "btn", type: "button" }, ["残す"]);
-      keep.addEventListener("click", () => finish("残しました。ヘッダーの「使い方」からいつでもやり直せます。"));
+      const keep = h("button", { class: "btn", type: "button" }, [m.tutorial.keep]);
+      keep.addEventListener("click", () => finish(m.tutorial.kept));
       actions.append(keep, del);
     } else {
-      const skip = h("button", { class: "btn", type: "button" }, ["スキップ"]);
+      const skip = h("button", { class: "btn", type: "button" }, [m.tutorial.skip]);
       skip.addEventListener("click", () => {
         toCleanup("skipped");
         update();

@@ -3,6 +3,7 @@
 
 import { icon, type IconName } from "./icons.ts";
 import type { GoalColor, NodeState } from "../core/model.ts";
+import { m } from "../i18n/index.ts";
 
 export function el<T extends HTMLElement = HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -31,11 +32,12 @@ export function iconSpan(name: IconName, size = 14): HTMLSpanElement {
   return s;
 }
 
-export const STATE_LABEL: Record<NodeState, string> = {
-  SATISFIED: "達成済み",
-  ACTIONABLE: "今やれる",
-  BLOCKED: "前提待ち",
-  CYCLIC: "待ち合って一周している",
+// 表の形のまま引けるように getter で持つ。値を定数に写すと言語の差し替えが届かない。
+export const STATE_LABEL: Readonly<Record<NodeState, string>> = {
+  get SATISFIED() { return m.dom.stateSatisfied; },
+  get ACTIONABLE() { return m.dom.stateActionable; },
+  get BLOCKED() { return m.dom.stateBlocked; },
+  get CYCLIC() { return m.dom.stateCyclic; },
 };
 
 export const STATE_ICON: Record<NodeState, IconName> = {
@@ -48,13 +50,13 @@ export const STATE_ICON: Record<NodeState, IconName> = {
 /** 付箋の色の呼び名。**色名だけを出す**——「重要」「あとで」のような意味を
  *  こちらで決めない。何を意味するかは貼る人が決めるものなので、名前を付けた
  *  時点でその自由が減る。 */
-export const COLOR_LABEL: Record<GoalColor, string> = {
-  yellow: "黄",
-  orange: "橙",
-  pink: "桃",
-  purple: "紫",
-  blue: "青",
-  green: "緑",
+export const COLOR_LABEL: Readonly<Record<GoalColor, string>> = {
+  get yellow() { return m.dom.colorYellow; },
+  get orange() { return m.dom.colorOrange; },
+  get pink() { return m.dom.colorPink; },
+  get purple() { return m.dom.colorPurple; },
+  get blue() { return m.dom.colorBlue; },
+  get green() { return m.dom.colorGreen; },
 };
 
 export function stateBadge(state: NodeState): HTMLSpanElement {

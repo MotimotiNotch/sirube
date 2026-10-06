@@ -940,6 +940,8 @@ body.no-inspector #inspector-resizer {
 .ctx-item .ctx-check { margin-left: auto; display: inline-flex; }
 .ctx-item .ctx-check .icon { color: var(--fg-muted); }
 .ctx-item:hover { background: var(--bg-sunken); }
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+.ctx-heading { padding: 4px 8px 2px; font-size: 11px; font-weight: 600; color: var(--fg-faint); }
 /* 外す系。**色だけで区別する**——確認を挟むほどではないが、隣の項目と
    同じ顔で並ぶと押し間違える。色は `.btn.danger` と同じ値にしてある
    （トークンが無いので増やさない。変えるときは2箇所）。 */

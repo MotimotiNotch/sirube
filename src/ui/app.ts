@@ -30,6 +30,7 @@ import { renderInspector } from "./inspector.ts";
 import { renderList } from "./list-view.ts";
 import { MANUAL_DOC } from "./manual-doc.ts";
 import { renderManual } from "./manual-view.ts";
+import { currentLangPref, m, setLangPref, type LangPref } from "../i18n/index.ts";
 
 interface AppState {
   graph: Graph;
@@ -326,7 +327,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   }
 
   if (issues.length > 0) {
-    toast(`${issues.length} 件のファイルに読み取り上の問題があります`);
+    toast(m.app.fileIssues(issues.length));
   }
 
   // ---- 再計算 ------------------------------------------------------------
@@ -334,7 +335,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    *  壊れることは無いので、失敗しても操作は続けさせる。 */
   const syncMocs = (): void => {
     void store.regenerateMocs(state.graph).catch(() => {
-      toast("入口ファイル（MOC）の更新に失敗しました");
+      toast(m.app.mocSyncFailed);
     });
   };
 
@@ -352,6 +353,17 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   el("search-icon").append(iconSpan("search", 15));
 
   const searchInput = el<HTMLInputElement>("search-input");
+  // index.html の静的な文言。HTML には日本語のまま置いてあり、ここで今の言語に差し替える。
+  searchInput.placeholder = m.app.searchPlaceholder;
+  const tourBtn = document.getElementById("tour-btn");
+  if (tourBtn) {
+    tourBtn.textContent = m.app.help;
+    tourBtn.title = m.app.helpTitle;
+  }
+  const goalsHeading = document.querySelector(".sidebar-heading");
+  if (goalsHeading) goalsHeading.textContent = m.app.goalsHeading;
+  document.getElementById("new-root-btn")?.setAttribute("title", m.app.newGoalTitle);
+  for (const id of ["sidebar-resizer", "inspector-resizer"]) document.getElementById(id)?.setAttribute("title", m.app.resizerTitle);
   searchInput.addEventListener("input", () => {
     state.query = searchInput.value;
     state.mode = "list";
@@ -390,7 +402,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    * 描き直されて一覧が変わったのを見た後になる。
    */
   const undoBtn = el<HTMLButtonElement>("undo-btn");
-  undoBtn.append(iconSpan("undo2", 14), document.createTextNode("戻す"));
+  undoBtn.append(iconSpan("undo2", 14), document.createTextNode(m.app.undo));
   undoBtn.addEventListener("click", () => void undoLast());
 
   const renderUndoBtn = (): void => {
@@ -400,17 +412,16 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       return;
     }
     if (lastUndo.kind === "structure") {
-      undoBtn.title = `${lastUndo.undo.label}を戻す`;
+      undoBtn.title = m.app.undoTitleStructure(lastUndo.undo.label);
       return;
     }
     const toggled = lastUndo.undo;
     const target = toggled.entries.find((e) => e.id === toggled.target);
-    const dir = target?.after === false ? "取り消し" : "達成";
-    undoBtn.title = `「${nameOf(toggled.target)}」の${dir}を戻す（${toggled.entries.length}件）`;
+    undoBtn.title = m.app.undoTitleToggle(nameOf(toggled.target), target?.after === false, toggled.entries.length);
   };
 
   const reconcileBtn = el<HTMLButtonElement>("reconcile-btn");
-  reconcileBtn.replaceChildren(iconSpan("wandSparkles", 14), document.createTextNode("自動解決"));
+  reconcileBtn.replaceChildren(iconSpan("wandSparkles", 14), document.createTextNode(m.app.autoFix));
   reconcileBtn.addEventListener("click", () => openReconcile());
   // ファイルの問題だけはボタンに件数を出す。トーストは消えるので、
   // 起動直後に見ていないと二度と気づけない。プランの件数を出さないのは、
@@ -463,10 +474,10 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   const copyNote = async (text: string): Promise<void> => {
     try {
       await navigator.clipboard.writeText(text);
-      toast("メモをコピーしました");
+      toast(m.app.noteCopied);
     } catch {
       // WebView やブラウザの設定で塞がっていることがある。黙って諦めない。
-      toast("コピーできませんでした");
+      toast(m.app.copyFailed);
     }
   };
 
@@ -519,7 +530,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    */
   const goMap = (): void => {
     if (state.goals.ids.length === 0) {
-      toast("ゴールがまだありません");
+      toast(m.app.noGoalsYet);
       return;
     }
     const here = state.focusId;
@@ -630,35 +641,33 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    */
   const openInsert = (parentId: string, childId: string, kind: "requires" | "contains"): void => {
     clear(modal);
-    modal.append(h("h3", {}, ["間に差し込む"]));
+    modal.append(h("h3", {}, [m.app.insertTitle]));
     modal.append(
       h("p", { class: "hint" }, [
-        `「${nameOf(parentId)}」と「${nameOf(childId)}」の間に入れる。`,
-        kind === "requires"
-          ? "元の繋がりは外れ、前提の鎖が1つ伸びる。"
-          : "元の繋がりは外れ、内包が1段深くなる。",
+        m.app.insertHint(nameOf(parentId), nameOf(childId)),
+        kind === "requires" ? m.app.insertHintRequires : m.app.insertHintContains,
       ]),
     );
-    const input = h("input", { type: "text", placeholder: "先にやること" }) as HTMLInputElement;
+    const input = h("input", { type: "text", placeholder: m.app.insertPlaceholder }) as HTMLInputElement;
     modal.append(input);
 
     const actions = h("div", { class: "modal-actions" });
-    const cancel = h("button", { class: "btn", type: "button" }, ["キャンセル"]);
+    const cancel = h("button", { class: "btn", type: "button" }, [m.common.cancel]);
     cancel.addEventListener("click", closeModal);
-    const ok = h("button", { class: "btn primary", type: "button" }, ["差し込む"]);
+    const ok = h("button", { class: "btn primary", type: "button" }, [m.app.insertOk]);
     ok.addEventListener("click", async () => {
       let node;
       try {
         node = await store.insertBetween(state.graph, parentId, childId, input.value, kind);
       } catch (e) {
-        toast(e instanceof Error ? e.message : "差し込めませんでした");
+        toast(e instanceof Error ? e.message : m.app.insertFailed);
         return;
       }
       recompute();
       closeModal();
       state.selectedId = node.id;
       render();
-      toast(`「${node.name}」を間に入れました`);
+      toast(m.app.inserted(node.name));
     });
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -752,7 +761,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     if (!stillValid) {
       lastUndo = undefined;
       render();
-      toast("ファイルが外で変わったので、この分は戻せません");
+      toast(m.app.undoStale);
       return;
     }
     if (last.kind === "structure") {
@@ -760,14 +769,14 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       lastUndo = undefined;
       recompute();
       render();
-      toast(`${last.undo.label}を戻しました`);
+      toast(m.app.undone(last.undo.label));
       return;
     }
     const changed = await store.undoToggle(state.graph, last.undo);
     lastUndo = undefined;
     recompute();
     render();
-    toast(`${changed.length} 件を戻しました`);
+    toast(m.app.undoneCount(changed.length));
   };
 
   const applyToggle = async (plan: TogglePlan): Promise<void> => {
@@ -779,7 +788,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     if (!fresh || !samePlan(fresh, plan)) {
       recompute();
       render();
-      toast("ファイルが外で変わったので、もう一度押してください");
+      toast(m.app.toggleStale);
       return;
     }
     const { changed, undo } = await store.applyToggle(state.graph, plan);
@@ -787,7 +796,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     lastUndo = changed.length > 1 ? { kind: "toggle", undo } : undefined;
     recompute();
     render();
-    if (changed.length > 1) toast(`${changed.length} 件が連動して変わりました（ヘッダーの「戻す」で元に戻せます）`);
+    if (changed.length > 1) toast(m.app.cascaded(changed.length));
   };
 
   /** 付箋を貼る／外す。トーストは出さない——色は押した瞬間に画面へ出るので、
@@ -832,7 +841,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     await store.persist(state.graph, [id]);
     recompute();
     render();
-    toast(on ? `「${nameOf(id)}」を地図に出しました` : `「${nameOf(id)}」を地図から外しました`);
+    toast(on ? m.app.goalShown(nameOf(id)) : m.app.goalHidden(nameOf(id)));
   };
 
   /** 親から選択中のノードへの繋がりを切る。ノードは残る。 */
@@ -846,7 +855,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     render();
     // 戻し方まで言う。「戻す」は次の操作で上書きされるので、そのあとに戻したく
     // なったときの書き方も残す。
-    toast(`「${parentName}」から「${childName}」を外しました（ヘッダーの「戻す」、または「まとめて書く」に「${parentName} -> ${childName}」で戻せます）`);
+    toast(m.app.detached(parentName, childName));
   };
 
   /**
@@ -865,7 +874,6 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    */
   const surfacesOnDetach = (childId: string): boolean =>
     inDegree(childId, state.rev) === 1 && state.graph.nodes[childId]?.goal === undefined;
-  const SURFACE_NOTE = "（目的として一覧に出ます）";
 
   const openMenu = (target: MenuTarget, x: number, y: number): void => {
     hideFlyout();
@@ -878,25 +886,25 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       select(target.id);
       const done = resolveState(state.graph, target.id, state.cycles.cyclic) === "SATISFIED";
       items.push({
-        label: done ? "未達に戻す" : "達成にする",
+        label: done ? m.app.reopen : m.app.markDone,
         icon: done ? "circleSlash" : "circleCheck",
         onSelect: () => void toggle(target.id),
       });
-      items.push({ label: "分解する", icon: "plus", onSelect: () => openBulkAdd(target.id) });
+      items.push({ label: m.app.breakDown, icon: "plus", onSelect: () => openBulkAdd(target.id) });
       const openWindow = options.openWindow;
       if (openWindow) {
-        items.push({ label: "別窓で開く", icon: "appWindow", onSelect: () => openWindow({ kind: "node", id: target.id }) });
+        items.push({ label: m.app.openInWindow, icon: "appWindow", onSelect: () => openWindow({ kind: "node", id: target.id }) });
       }
       const on = isGoal(state.graph, target.id, state.rev);
       items.push({
-        label: on ? "地図から外す" : "地図に出す",
+        label: on ? m.app.hideFromMap : m.app.showOnMap,
         icon: "compass",
         onSelect: () => void setGoal(target.id, !on),
       });
       // 地図では左クリックが「選ぶ」だけなので、降りる口をここにも置く。
       // 詳細では押せば潜るので要らない。
       if (state.layer === "goals") {
-        items.push({ label: "グラフで開く", icon: "layers", onSelect: () => focusFresh(target.id) });
+        items.push({ label: m.app.openInGraph, icon: "layers", onSelect: () => focusFresh(target.id) });
       }
       // 外す（2026-09-28、のっち「ノードのメニューの方がいい」）。外したいと思って
       // 右クリックするのはノードの方で、線の当たり判定（14px）は狙いにくい。
@@ -909,10 +917,10 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
           ...(state.rev.containedBy.get(target.id) ?? []),
         ];
         const ordered = [...new Set(parents)].sort((a, b) => Number(b === state.focusId) - Number(a === state.focusId));
-        const note = surfacesOnDetach(target.id) ? SURFACE_NOTE : "";
+        const note = surfacesOnDetach(target.id) ? m.app.surfaceNote : "";
         for (const p of ordered) {
           items.push({
-            label: `「${nameOf(p)}」から外す${note}`,
+            label: m.app.detachFrom(nameOf(p), note),
             icon: "x",
             danger: true,
             onSelect: () => void detach(p, target.id),
@@ -923,12 +931,12 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       const parent = nameOf(target.parentId);
       const child = nameOf(target.childId);
       items.push({
-        label: "間にノードを差し込む",
+        label: m.app.insertNodeBetween,
         icon: "cornerDownRight",
         onSelect: () => openInsert(target.parentId, target.childId, target.edge),
       });
       items.push({
-        label: `「${parent}」から「${child}」を外す${surfacesOnDetach(target.childId) ? SURFACE_NOTE : ""}`,
+        label: m.app.detachEdge(parent, child, surfacesOnDetach(target.childId) ? m.app.surfaceNote : ""),
         icon: "x",
         danger: true,
         onSelect: () => void detach(target.parentId, target.childId),
@@ -937,7 +945,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       const node = state.graph.nodes[target.id];
       if (!node) return;
       items.push({
-        label: "編集する",
+        label: m.app.edit,
         icon: "pencil",
         onSelect: () => {
           state.insp.noteEditing = true;
@@ -946,13 +954,13 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       });
       // 空のメモをコピーしても何も起きない。項目は出さない。
       if (node.note.trim() !== "") {
-        items.push({ label: "メモをコピー", icon: "stickyNote", onSelect: () => void copyNote(node.note) });
+        items.push({ label: m.app.copyNote, icon: "stickyNote", onSelect: () => void copyNote(node.note) });
       }
     } else {
-      items.push({ label: "目的を1つ作る", icon: "plus", onSelect: () => openAdd("one") });
+      items.push({ label: m.app.newGoal, icon: "plus", onSelect: () => openAdd("one") });
       // 呼び名は作る画面のタブ「まとめて書く」に揃える（2026-09-28。以前はここと
       // トーストだけ「まとめて追加」で、同じ機能に名前が2つあった）。
-      items.push({ label: "まとめて書く", icon: "listChecks", onSelect: () => openAdd("bulk") });
+      items.push({ label: m.app.bulkAdd, icon: "listChecks", onSelect: () => openAdd("bulk") });
     }
     openContextMenu(x, y, items);
   };
@@ -963,7 +971,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     node.note = note;
     await store.persist(state.graph, [id]);
     syncMocs(); // 構造は変わらないが mtime は動くので、目的の並び順に効く
-    toast("メモを保存しました");
+    toast(m.app.noteSaved);
   };
 
   const rename = async (id: string, name: string): Promise<void> => {
@@ -973,13 +981,13 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     } catch (e) {
       // 同名は作らせない。名前で参照を解決する経路（まとめて書く）があるので、
       // 同じ名前が2つあるとどちらにも繋がずに止まる。
-      toast(e instanceof Error ? e.message : "名前を変えられませんでした");
+      toast(e instanceof Error ? e.message : m.app.renameFailed);
       render();
       return;
     }
     recompute();
     render();
-    if (nameOf(id) !== before) toast(`「${nameOf(id)}」に変えました`);
+    if (nameOf(id) !== before) toast(m.app.renamed(nameOf(id)));
   };
 
   const removeNode = async (id: string): Promise<void> => {
@@ -993,7 +1001,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     recompute();
     if (!state.focusId) state.mode = "list";
     render();
-    toast(`「${name}」を削除しました（ヘッダーの「戻す」で戻せます）`);
+    toast(m.app.deleted(name));
   };
 
   // ---- モーダル ----------------------------------------------------------
@@ -1032,7 +1040,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     /** 格納中に出す引き出しボタンの向き。しまった側から中央へ開く矢印にする。 */
     openDir: "right" | "left";
     /** 引き出しボタンの読み上げ名。 */
-    openLabel: string;
+    openLabel: () => string;
     /** 格納したときにパネル自体を消すための body クラス。列幅を0にしても
      * padding が残って数十pxの帯になるので、幅だけでは畳みきれない。 */
     hideClass: string;
@@ -1076,8 +1084,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     // 格納すると 5px のレールしか残らず、そこに掴めるものがあると気づけない。
     // しまった側から中央へ開く矢印を1つ置いて、押せば既定幅で戻るようにする。
     const openBtn = h("button", { class: "rail-btn", type: "button" }) as HTMLButtonElement;
-    openBtn.setAttribute("aria-label", o.openLabel);
-    openBtn.title = o.openLabel;
+    openBtn.setAttribute("aria-label", o.openLabel());
+    openBtn.title = o.openLabel();
     openBtn.append(iconSpan("chevronRight", 14));
     if (o.openDir === "left") openBtn.classList.add("flip");
     // レールの pointerdown はドラッグ開始なので、ボタンの上では止める。
@@ -1121,7 +1129,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   setupPane({
     id: "sidebar-resizer",
     openDir: "right",
-    openLabel: "目的の一覧を開く",
+    openLabel: () => m.app.openSidebar,
     hideClass: "hide-sidebar",
     cssVar: "--sidebar-w",
     storageKey: "sirube.sidebarWidth",
@@ -1133,7 +1141,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   setupPane({
     id: "inspector-resizer",
     openDir: "left",
-    openLabel: "詳細パネルを開く",
+    openLabel: () => m.app.openInspector,
     hideClass: "hide-inspector",
     cssVar: "--inspector-w",
     storageKey: "sirube.inspectorWidth",
@@ -1162,23 +1170,23 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    * 組み上がるので、途中で差し替えるより読み直す方が確実。 */
   const openVault = (info: VaultInfo): void => {
     clear(modal);
-    modal.append(h("h3", {}, ["データの場所"]));
-    modal.append(h("p", { class: "hint" }, ["ノードはこのフォルダの中だけにあります。Git で共有するのも、Obsidian で開くのもこの単位。"]));
+    modal.append(h("h3", {}, [m.app.vaultTitle]));
+    modal.append(h("p", { class: "hint" }, [m.app.vaultHint]));
     modal.append(h("div", { class: "vault-path" }, [info.path]));
 
     const actions = h("div", { class: "modal-actions" });
-    const cancel = h("button", { class: "btn", type: "button" }, ["閉じる"]);
+    const cancel = h("button", { class: "btn", type: "button" }, [m.common.close]);
     cancel.addEventListener("click", closeModal);
     actions.append(cancel);
     const switchVault = info.switchVault;
     if (switchVault) {
       const swap = h("button", { class: "btn", type: "button" });
-      swap.append(iconSpan("folderOpen", 14), "別のフォルダを開く");
+      swap.append(iconSpan("folderOpen", 14), m.app.openOtherFolder);
       swap.addEventListener("click", () => void switchVault());
       actions.append(swap);
     } else {
       // サブ窓。切り替えると本窓と別のフォルダを指す窓ができてしまう。
-      modal.append(h("p", { class: "hint" }, ["別のフォルダを開くのは最初の窓から。この窓はそのとき閉じます。"]));
+      modal.append(h("p", { class: "hint" }, [m.app.openOtherFolderSub]));
     }
     modal.append(actions);
     openModal();
@@ -1221,7 +1229,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       b.addEventListener("click", () => openAdd(m));
       return b;
     };
-    tabs.append(tab("one", "1つ作る"), tab("bulk", "まとめて書く"));
+    tabs.append(tab("one", m.app.tabOne), tab("bulk", m.app.bulkAdd));
     modal.append(tabs);
 
     if (mode === "one") appendOneForm();
@@ -1232,20 +1240,20 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   const appendOneForm = (): void => {
     modal.append(
       h("p", { class: "hint" }, [
-        "達成したいことを1つ書く。作るとグラフが開くので、何が必要かは右の「分解する」から足せる。Enter で作成。",
+        m.app.oneHint,
       ]),
     );
-    const input = h("input", { type: "text", placeholder: "引っ越す" }) as HTMLInputElement;
+    const input = h("input", { type: "text", placeholder: m.app.onePlaceholder }) as HTMLInputElement;
     modal.append(input);
 
     const actions = h("div", { class: "modal-actions" });
-    const cancel = h("button", { class: "btn", type: "button" }, ["キャンセル"]);
+    const cancel = h("button", { class: "btn", type: "button" }, [m.common.cancel]);
     cancel.addEventListener("click", closeModal);
-    const ok = h("button", { class: "btn primary", type: "button" }, ["作成"]);
+    const ok = h("button", { class: "btn primary", type: "button" }, [m.app.create]);
     ok.addEventListener("click", async () => {
       const name = input.value.trim();
       if (!name) {
-        toast("名前を入れてください");
+        toast(m.app.nameRequired);
         return;
       }
       // 同じ名前が既にあるなら作らずそこへ飛ぶ。一括追加が「既にある名前を書けば
@@ -1256,14 +1264,14 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       if (existing) {
         closeModal();
         focusFresh(existing.id);
-        toast(`「${existing.name}」は既にあります`);
+        toast(m.app.alreadyExists(existing.name));
         return;
       }
       const node = await store.createNode(state.graph, name);
       recompute();
       closeModal();
       focusFresh(node.id);
-      toast(`「${node.name}」を作りました`);
+      toast(m.app.created(node.name));
     });
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -1288,28 +1296,28 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   const appendBulkForm = (): void => {
     modal.append(
       h("p", { class: "hint" }, [
-        "分解を書き下すと、そのままノードとエッジになる。既にある名前を書けば、そのノードに繋がる（新しくは作られない）。Ctrl+Enter で追加。",
+        m.app.bulkHint,
       ]),
     );
 
     // 説明は初回しか読まれない。畳んで、必要な人だけ開く（表示量の原則3）。
     const help = h("details", { class: "dsl-help" });
-    help.append(h("summary", {}, ["書き方"]));
+    help.append(h("summary", {}, [m.app.bulkHelpSummary]));
     const rules = h("ul");
     for (const line of [
-      "X -> Y は「X には Y が必要」（requires）",
-      "[...] は直前のノードの中身（contains）。親 -> [子1] -> [子2] で兄弟が並ぶ",
-      ", で式を区切る。同じ名前は同じノードになる",
+      m.app.bulkRuleRequires,
+      m.app.bulkRuleContains,
+      m.app.bulkRuleComma,
     ]) {
       rules.append(h("li", {}, [line]));
     }
     help.append(rules);
-    help.append(h("pre", {}, ["引っ越し -> 引っ越し先の家 -> 不動産に行く,\n引っ越し -> お金を貯める"]));
+    help.append(h("pre", {}, [m.app.bulkExample]));
     modal.append(help);
 
     const ta = h("textarea", {
       class: "dsl-input",
-      placeholder: "リリース -> 手順書, リリース -> CI/CD",
+      placeholder: m.app.bulkPlaceholder,
     }) as HTMLTextAreaElement;
     modal.append(ta);
 
@@ -1337,16 +1345,16 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       const linked = parsed.nodes.length - fresh.length;
       preview.textContent =
         linked > 0
-          ? `${fresh.length} 件を新しく作り、${linked} 件は既存に繋ぎます`
-          : `${fresh.length} 件を新しく作ります`;
+          ? m.app.bulkPreviewLinked(fresh.length, linked)
+          : m.app.bulkPreviewFresh(fresh.length);
     };
     ta.addEventListener("input", updatePreview);
     modal.append(preview);
 
     const actions = h("div", { class: "modal-actions" });
-    const cancel = h("button", { class: "btn", type: "button" }, ["キャンセル"]);
+    const cancel = h("button", { class: "btn", type: "button" }, [m.common.cancel]);
     cancel.addEventListener("click", closeModal);
-    const ok = h("button", { class: "btn primary", type: "button" }, ["追加"]);
+    const ok = h("button", { class: "btn primary", type: "button" }, [m.common.add]);
     ta.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
@@ -1364,7 +1372,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       // 作った先へ飛ぶ。最初に書いたノードが、書き手にとっての起点。
       const first = res.created[0] ?? res.updated[0];
       if (first) focusFresh(first);
-      toast(`${res.created.length} 件を作り、${res.updated.length} 件に繋ぎました`);
+      toast(m.app.bulkDone(res.created.length, res.updated.length));
       offerShortcuts(res.addedRequires);
     });
     actions.append(cancel, ok);
@@ -1393,27 +1401,26 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       b.addEventListener("click", () => openBulkAdd(targetId, k, ta.value));
       return b;
     };
-    tabs.append(tab("requires", "前提"), tab("contains", "中身"));
+    tabs.append(tab("requires", m.app.tabRequires), tab("contains", m.app.tabContains));
     modal.append(tabs);
 
     modal.append(
-      h("h3", {}, [kind === "requires" ? `「${nameOf(targetId)}」には何が必要？` : `「${nameOf(targetId)}」は何でできている？`]),
+      h("h3", {}, [kind === "requires" ? m.app.decomposeTitleRequires(nameOf(targetId)) : m.app.decomposeTitleContains(nameOf(targetId))]),
     );
     modal.append(
       h("p", { class: "hint" }, [
         kind === "requires"
-          ? "揃ったあとも「" + nameOf(targetId) + "」自体にやることが残るなら前提。"
-          : "全部揃えば「" + nameOf(targetId) + "」自体にやることは残らないなら中身（担当分・部品・機能のまとまり）。",
-        "1行に1つ書く。既にある名前を書けば、そのノードに繋がる（新しくは作られない）。Ctrl+Enter で追加。",
+          ? m.app.decomposeHintRequires(nameOf(targetId))
+          : m.app.decomposeHintContains(nameOf(targetId)),
+        m.app.decomposeHintLines,
       ]),
     );
     const ta = h("textarea", {
-      placeholder: kind === "requires" ? "引っ越し先の家\nお金を貯める\n不動産に行く" : "近道を見せる\n中身を一括で足す",
+      placeholder: kind === "requires" ? m.app.decomposePlaceholderRequires : m.app.decomposePlaceholderContains,
     }) as HTMLTextAreaElement;
     ta.value = draft;
     modal.append(ta);
 
-    const label = kind === "requires" ? "前提" : "中身";
     // 書いた行を「新しく作る／既存に繋ぐ／もう繋がっている」に分ける（2026-09-28、
     // のっち）。行数だけ数えると、既にある名前を書いたとき「新しく作られたのでは」
     // という不安が残る——「まとめて書く」の下見が既に分けて出しているのと揃える。
@@ -1453,21 +1460,19 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       }
       const parts: string[] = [];
       if (adding > 0) {
-        parts.push(
-          linked > 0 ? `${adding} 件の${label}を追加します（うち ${linked} 件は既存に繋ぎます）` : `${adding} 件の${label}を追加します`,
-        );
+        parts.push(m.app.decomposePreviewAdd(kind, adding, linked));
       }
-      if (already > 0) parts.push(`${already} 件は既に${label}です`);
-      preview.textContent = parts.join("。");
+      if (already > 0) parts.push(m.app.decomposePreviewAlready(kind, already));
+      preview.textContent = parts.join(m.app.previewJoin);
     };
     updatePreview();
     ta.addEventListener("input", updatePreview);
     modal.append(preview);
 
     const actions = h("div", { class: "modal-actions" });
-    const cancel = h("button", { class: "btn", type: "button" }, ["キャンセル"]);
+    const cancel = h("button", { class: "btn", type: "button" }, [m.common.cancel]);
     cancel.addEventListener("click", closeModal);
-    const ok = h("button", { class: "btn primary", type: "button" }, ["追加"]);
+    const ok = h("button", { class: "btn primary", type: "button" }, [m.common.add]);
     // 改行で項目を区切る入力なので、Enter は改行のまま。確定は Ctrl+Enter。
     // ここでマウスへ往復させると、3行打つたびに手が離れて分解の速度が落ちる。
     ta.addEventListener("keydown", (e) => {
@@ -1493,12 +1498,12 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       const made = res.created.length;
       toast(
         made > 0 && linked > 0
-          ? `${made + linked} 件を追加しました（うち ${linked} 件は既存に繋ぎました）`
+          ? m.app.decomposeAddedBoth(made + linked, linked)
           : made > 0
-          ? `${made} 件を追加しました`
+          ? m.app.decomposeAdded(made)
           : linked > 0
-          ? `${linked} 件を既存に繋ぎました`
-          : `どれも既に${label}です`,
+          ? m.app.decomposeLinked(linked)
+          : m.app.decomposeAllAlready(kind),
       );
       if (kind === "requires") offerShortcuts(res.addedRequires);
       else offerReopen(targetId, containsBefore);
@@ -1532,16 +1537,16 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     if (fresh.length === 0) return;
 
     clear(modal);
-    modal.append(h("h3", {}, [`「${parent.name}」は達成済みです`]));
+    modal.append(h("h3", {}, [m.app.reopenTitle(parent.name)]));
     modal.append(
       h("p", { class: "hint" }, [
-        `未達の中身を ${fresh.length} 件足したので、今ある分はまだ終わっていません。未達に戻しますか？ 戻さないと、達成のまま中に未達が残ります（自動解決はここを戻しません）。`,
+        m.app.reopenHint(fresh.length),
       ]),
     );
     const actions = h("div", { class: "modal-actions" });
-    const keep = h("button", { class: "btn", type: "button" }, ["そのまま"]);
+    const keep = h("button", { class: "btn", type: "button" }, [m.common.keep]);
     keep.addEventListener("click", closeModal);
-    const ok = h("button", { class: "btn primary", type: "button" }, ["未達に戻す"]);
+    const ok = h("button", { class: "btn primary", type: "button" }, [m.app.reopen]);
     ok.addEventListener("click", () => {
       closeModal();
       if (state.graph.nodes[parentId]?.satisfied) void toggle(parentId);
@@ -1567,27 +1572,27 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     if (shortcuts.length === 0) return;
 
     clear(modal);
-    modal.append(h("h3", {}, ["直接の繋がりが要らなくなりました"]));
+    modal.append(h("h3", {}, [m.app.shortcutsTitle]));
     modal.append(
       h("p", { class: "hint" }, [
-        "別の前提を通って同じノードに届いています。直接の線を残すと、2か所から求められている合流点に見えます。外しても達成状態は変わりません。",
+        m.app.shortcutsHint,
       ]),
     );
     const ul = h("ul", { class: "plan-list" });
     for (const s of shortcuts) {
       ul.append(
         h("li", {}, [
-          h("span", { class: "plan-kind" }, ["外す"]),
-          `${nameOf(s.from)} → ${nameOf(s.to)}（${nameOf(s.via)} から届く）`,
+          h("span", { class: "plan-kind" }, [m.common.detach]),
+          m.app.shortcutItem(nameOf(s.from), nameOf(s.to), nameOf(s.via)),
         ]),
       );
     }
     modal.append(ul);
 
     const actions = h("div", { class: "modal-actions" });
-    const keep = h("button", { class: "btn", type: "button" }, ["そのまま"]);
+    const keep = h("button", { class: "btn", type: "button" }, [m.common.keep]);
     keep.addEventListener("click", closeModal);
-    const ok = h("button", { class: "btn primary", type: "button" }, ["外す"]);
+    const ok = h("button", { class: "btn primary", type: "button" }, [m.common.detach]);
     ok.addEventListener("click", async () => {
       closeModal();
       // 1件ずつ確かめ直してから外す。出している間に外でファイルが変わり、
@@ -1597,14 +1602,14 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       recompute();
       render();
       if (done.length === 0) {
-        toast("ファイルが外で変わったので、外しませんでした");
+        toast(m.app.shortcutsStale);
         return;
       }
       const one = done.length === 1 ? done[0]! : undefined;
       toast(
         one
-          ? `「${nameOf(one.from)}」から「${nameOf(one.to)}」を外しました（ヘッダーの「戻す」、または「まとめて書く」に「${nameOf(one.from)} -> ${nameOf(one.to)}」で戻せます）`
-          : `直接の線を ${done.length} 本外しました（ヘッダーの「戻す」で戻せます）`,
+          ? m.app.detached(nameOf(one.from), nameOf(one.to))
+          : m.app.shortcutsDetached(done.length),
       );
     });
     actions.append(keep, ok);
@@ -1630,33 +1635,33 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   const openTogglePreview = (plan: TogglePlan): void => {
     clear(modal);
     const on = plan.satisfied;
-    modal.append(h("h3", {}, [on ? "達成にすると、前提も達成になります" : "達成を取り消すと、下流も戻ります"]));
+    modal.append(h("h3", {}, [on ? m.app.togglePreviewOn : m.app.togglePreviewOff]));
     modal.append(
       h("p", { class: "hint" }, [
         on
-          ? "「後が終わっているなら、前も終わっていたはず」として遡ります。ファイルに書き込むので、内容を確認してください。"
-          : "「前提が崩れたなら、その上に積んだものも本当は終わっていない」として戻します。前提側には触りません。",
+          ? m.app.togglePreviewHintOn
+          : m.app.togglePreviewHintOff,
       ]),
     );
 
     modal.append(
-      h("h4", { style: "margin:12px 0 4px;font-size:12px" }, [`書き換わる（${plan.changes.length}）`]),
+      h("h4", { style: "margin:12px 0 4px;font-size:12px" }, [m.app.rewrites(plan.changes.length)]),
     );
     const ul = h("ul", { class: "plan-list" });
     for (const c of plan.changes) {
       const li = h("li");
       switch (c.kind) {
         case "target":
-          li.append(h("span", { class: "plan-kind" }, [c.satisfied ? "達成にする" : "達成を戻す"]), nameOf(c.id));
+          li.append(h("span", { class: "plan-kind" }, [c.satisfied ? m.app.markDone : m.app.unmarkDone]), nameOf(c.id));
           break;
         case "prerequisite":
-          li.append(h("span", { class: "plan-kind" }, ["前提を埋める"]), `${nameOf(c.id)}（${nameOf(c.via)} の前提）`);
+          li.append(h("span", { class: "plan-kind" }, [m.app.fillPrerequisite]), m.app.prerequisiteOf(nameOf(c.id), nameOf(c.via)));
           break;
         case "contains-parent":
-          li.append(h("span", { class: "plan-kind" }, ["親を達成に"]), `${nameOf(c.id)}（子が全部揃った）`);
+          li.append(h("span", { class: "plan-kind" }, [m.app.parentDone]), m.app.childrenDone(nameOf(c.id)));
           break;
         case "dependent":
-          li.append(h("span", { class: "plan-kind" }, ["達成を戻す"]), `${nameOf(c.id)}（${nameOf(c.via)} が戻るため）`);
+          li.append(h("span", { class: "plan-kind" }, [m.app.unmarkDone]), m.app.becauseUndone(nameOf(c.id), nameOf(c.via)));
           break;
       }
       ul.append(li);
@@ -1666,15 +1671,15 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     if (on) {
       modal.append(
         h("p", { class: "hint" }, [
-          "覚えのないものが並んでいたら、前提が AND になっているか疑ってください。「どれか1本立てばいい」ものは前提ではなく選択肢なので、繋がずにメモへ書きます。",
+          m.app.toggleAndHint,
         ]),
       );
     }
 
     const actions = h("div", { class: "modal-actions" });
-    const cancel = h("button", { class: "btn", type: "button" }, ["キャンセル"]);
+    const cancel = h("button", { class: "btn", type: "button" }, [m.common.cancel]);
     cancel.addEventListener("click", closeModal);
-    const ok = h("button", { class: "btn primary", type: "button" }, [on ? "達成にする" : "取り消す"]);
+    const ok = h("button", { class: "btn primary", type: "button" }, [on ? m.app.markDone : m.app.cancelDone]);
     ok.addEventListener("click", async () => {
       closeModal();
       await applyToggle(plan);
@@ -1692,20 +1697,20 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
   const openReconcile = (): void => {
     const plan = state.plan;
     clear(modal);
-    modal.append(h("h3", {}, ["自動解決"]));
+    modal.append(h("h3", {}, [m.app.autoFix]));
 
     if (plan.fixes.length === 0 && plan.unresolved.length === 0 && state.issues.length === 0) {
-      modal.append(h("p", { class: "hint" }, ["不整合はありませんでした。"]));
+      modal.append(h("p", { class: "hint" }, [m.app.reconcileNone]));
     } else {
       modal.append(
         h("p", { class: "hint" }, [
-          "変更時刻の新しい方を「最新の意図」として扱います。実行前に内容を確認してください。",
+          m.app.reconcileHint,
         ]),
       );
     }
 
     if (plan.fixes.length > 0) {
-      modal.append(h("h4", { style: "margin:12px 0 4px;font-size:12px" }, [`自動解決する（${plan.fixes.length}）`]));
+      modal.append(h("h4", { style: "margin:12px 0 4px;font-size:12px" }, [m.app.reconcileFixes(plan.fixes.length)]));
       const ul = h("ul", { class: "plan-list" });
       // 計画は id で組み立てられている（コアは表示を決めない）ので、出す直前に
       // 名前へ直す。`create-missing-node` の対象だけはグラフにまだ居ないため
@@ -1715,19 +1720,19 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
         const li = h("li");
         switch (f.kind) {
           case "satisfy-prerequisite":
-            li.append(h("span", { class: "plan-kind" }, ["前提を埋める"]), `${nameOf(f.prerequisite)}（${nameOf(f.node)} の方が新しい）`);
+            li.append(h("span", { class: "plan-kind" }, [m.app.fillPrerequisite]), m.app.newerThan(nameOf(f.prerequisite), nameOf(f.node)));
             break;
           case "unsatisfy-node":
-            li.append(h("span", { class: "plan-kind" }, ["達成を戻す"]), `${nameOf(f.node)}（${nameOf(f.prerequisite)} の方が新しい）`);
+            li.append(h("span", { class: "plan-kind" }, [m.app.unmarkDone]), m.app.newerThan(nameOf(f.node), nameOf(f.prerequisite)));
             break;
           case "satisfy-contains-parent":
-            li.append(h("span", { class: "plan-kind" }, ["親を達成に"]), `${nameOf(f.parent)}（子が全部揃った）`);
+            li.append(h("span", { class: "plan-kind" }, [m.app.parentDone]), m.app.childrenDone(nameOf(f.parent)));
             break;
           case "unsatisfy-contains-parent":
-            li.append(h("span", { class: "plan-kind" }, ["達成を戻す"]), `${nameOf(f.parent)}（中身の ${nameOf(f.child)} が未達で、そちらの方が新しい）`);
+            li.append(h("span", { class: "plan-kind" }, [m.app.unmarkDone]), m.app.childNewer(nameOf(f.parent), nameOf(f.child)));
             break;
           case "create-missing-node":
-            li.append(h("span", { class: "plan-kind" }, ["空ノード作成"]), `${f.id}（${f.referencedBy.map(nameOf).join(", ")} が参照）`);
+            li.append(h("span", { class: "plan-kind" }, [m.app.createEmpty]), m.app.referencedBy(f.id, f.referencedBy.map(nameOf)));
             break;
         }
         ul.append(li);
@@ -1737,29 +1742,29 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
 
     if (plan.unresolved.length > 0) {
       modal.append(
-        h("h4", { style: "margin:14px 0 4px;font-size:12px" }, [`判断が必要（${plan.unresolved.length}）`]),
+        h("h4", { style: "margin:14px 0 4px;font-size:12px" }, [m.app.needsDecision(plan.unresolved.length)]),
       );
       const ul = h("ul", { class: "plan-list" });
       for (const u of plan.unresolved) {
         const li = h("li");
         if (u.kind === "cycle") {
-          li.append(h("span", { class: "plan-kind" }, ["待ち合い"]), `${u.nodes.map(nameOf).join("・")}（分解が要る）`);
+          li.append(h("span", { class: "plan-kind" }, [m.app.cycle]), m.app.cycleItem(u.nodes.map(nameOf)));
         } else if (u.kind === "near-duplicate") {
-          li.append(h("span", { class: "plan-kind" }, ["表記ゆれ"]), u.ids.map(nameOf).join(" / "));
+          li.append(h("span", { class: "plan-kind" }, [m.app.nearDuplicate]), u.ids.map(nameOf).join(" / "));
         } else if (u.kind === "contains-cycle") {
           li.append(
-            h("span", { class: "plan-kind" }, ["内包の待ち合い"]),
-            `${u.nodes.map(nameOf).join(" → ")} → …（割るのではなく、どれかの「これで構成」を外す）`,
+            h("span", { class: "plan-kind" }, [m.app.containsCycle]),
+            m.app.containsCycleItem(u.nodes.map(nameOf)),
           );
         } else if (u.kind === "oscillating") {
           li.append(
-            h("span", { class: "plan-kind" }, ["決められない"]),
-            `${nameOf(u.node)} — 達成と未達成を行き来するので、どちらが正しいか手で決めてください`,
+            h("span", { class: "plan-kind" }, [m.app.oscillating]),
+            m.app.oscillatingItem(nameOf(u.node)),
           );
         } else {
           li.append(
-            h("span", { class: "plan-kind" }, ["時刻が近すぎる"]),
-            `${nameOf(u.node)} と ${nameOf(u.prerequisite)} — どちらが新しいか判断できません`,
+            h("span", { class: "plan-kind" }, [m.app.tooClose]),
+            m.app.tooCloseItem(nameOf(u.node), nameOf(u.prerequisite)),
           );
         }
         ul.append(li);
@@ -1772,23 +1777,23 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     // 誤解させる。
     if (state.issues.length > 0) {
       modal.append(
-        h("h4", { style: "margin:14px 0 4px;font-size:12px" }, [`ファイルの問題（${state.issues.length}）`]),
+        h("h4", { style: "margin:14px 0 4px;font-size:12px" }, [m.app.fileProblems(state.issues.length)]),
       );
       const ul = h("ul", { class: "plan-list" });
       for (const i of state.issues) {
         const li = h("li");
-        li.append(h("span", { class: "plan-kind" }, ["読めない"]), `${nameOf(i.id)} — ${i.problems.join(" / ")}`);
+        li.append(h("span", { class: "plan-kind" }, [m.app.unreadable]), `${nameOf(i.id)} — ${i.problems.join(" / ")}`);
         ul.append(li);
       }
       modal.append(ul);
     }
 
     const actions = h("div", { class: "modal-actions" });
-    const cancel = h("button", { class: "btn", type: "button" }, ["閉じる"]);
+    const cancel = h("button", { class: "btn", type: "button" }, [m.common.close]);
     cancel.addEventListener("click", closeModal);
     actions.append(cancel);
     if (plan.fixes.length > 0) {
-      const ok = h("button", { class: "btn primary", type: "button" }, ["実行"]);
+      const ok = h("button", { class: "btn primary", type: "button" }, [m.app.run]);
       ok.addEventListener("click", async () => {
         await store.reconcile(state.graph, plan);
         recompute();
@@ -1810,7 +1815,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     // 俯瞰は「全体の今やれること」ではないので、ここは点かない。
     const onTopList = state.mode === "list" && state.query === "" && !state.scopeId;
     nav.className = `nav-item${onTopList && !state.recent ? " active" : ""}`;
-    nav.append(iconSpan("listChecks", 15), document.createTextNode("今やれること"));
+    nav.append(iconSpan("listChecks", 15), document.createTextNode(m.app.readyNow));
     nav.append(h("span", { class: "count" }, [String(actionableCount)]));
     nav.onclick = () => {
       state.query = "";
@@ -1823,7 +1828,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     const recentNav = el<HTMLButtonElement>("nav-recent");
     recentNav.replaceChildren();
     recentNav.className = `nav-item${onTopList && state.recent ? " active" : ""}`;
-    recentNav.append(iconSpan("clock", 15), document.createTextNode("最近の変更"));
+    recentNav.append(iconSpan("clock", 15), document.createTextNode(m.app.recentChanges));
     recentNav.onclick = () => goList(undefined, true);
 
     const list = el("root-list");
@@ -1837,11 +1842,11 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       // ノードはあるのにゴールが無いのは、根を全部地図から外したとき。
       // 「まだ無い」と言うと、作ったものが消えたように読める。
       const hasNodes = Object.keys(state.graph.nodes).length > 0;
-      empty.append(h("div", {}, [hasNodes ? "地図に出している目的がありません" : "まだ目的がありません"]));
+      empty.append(h("div", {}, [hasNodes ? m.app.noGoalsOnMap : m.app.noGoals]));
       // 文言だけ出して終わらない。ここが起動直後の画面なので、次の操作が
       // 同じ場所に無いと手が止まる。
       const make = h("button", { class: "btn", type: "button", style: "margin-top:8px" });
-      make.append(iconSpan("plus", 13), "目的を作る");
+      make.append(iconSpan("plus", 13), m.app.makeGoal);
       make.addEventListener("click", () => openAdd());
       empty.append(make);
       list.append(empty);
@@ -1884,8 +1889,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     {
       const target = state.selectedId && state.graph.nodes[state.selectedId] ? state.selectedId : undefined;
       const title = target
-        ? `「${nameOf(target)}」に足す（既にある名前を書けば繋がる）`
-        : "まとめて書く（既にある名前を書けば繋がる）";
+        ? m.app.addToTitle(nameOf(target))
+        : m.app.bulkAddTitle;
       const add = h("button", { class: "crumb-add", type: "button", title, "aria-label": title });
       add.append(iconSpan("plus", 14));
       add.addEventListener("click", () => (target ? openBulkAdd(target) : openAdd("bulk")));
@@ -1926,7 +1931,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
      * 変わらないので、ここだけ道が消えると「どこの配下を見ているのか」の
      * 手がかりが `◯◯ の配下` の1語だけになる。 */
     const appendTrail = (): void => {
-      const home = h("button", { type: "button" }, ["今やれること"]);
+      const home = h("button", { type: "button" }, [m.app.readyNow]);
       home.addEventListener("click", () => goList());
       bar.append(home);
       state.trail.forEach((id, i) => {
@@ -1945,7 +1950,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
     };
 
     if (state.mode === "manual") {
-      bar.append(h("span", { class: "current" }, ["使い方"]));
+      bar.append(h("span", { class: "current" }, [m.app.help]));
       return;
     }
 
@@ -1955,8 +1960,8 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       if (scopeId && scope) {
         appendTrail();
         appendSep();
-        bar.append(h("span", { class: "current" }, [`${scope.name} の配下`]));
-        appendToggle("グラフ", () => {
+        bar.append(h("span", { class: "current" }, [m.app.underScope(scope.name)]));
+        appendToggle(m.app.graph, () => {
           state.mode = "graph";
           state.scopeId = undefined;
           state.focusId = scopeId;
@@ -1966,7 +1971,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       }
       bar.append(
         h("span", { class: "current" }, [
-          state.query !== "" ? `「${state.query}」の検索結果` : state.recent ? "最近の変更" : "今やれること",
+          state.query !== "" ? m.app.searchResultsFor(state.query) : state.recent ? m.app.recentChanges : m.app.readyNow,
         ]),
       );
       return;
@@ -1979,27 +1984,27 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       const current = h("span", { class: "current" }, []);
       // 縮尺を文字で言う。押せるものが「グラフ」しか無い状態からでも推測は
       // できるが、半年ぶりに開いた人には推測させない。
-      if (onMap) current.append(h("span", { class: "crumb-layer" }, ["地図"]));
+      if (onMap) current.append(h("span", { class: "crumb-layer" }, [m.app.map]));
       // 現在地が無いことがある（上にゴールが1つも無い場所から上がったとき）。
       // **無関係なゴールの名前を置くより「全体」と言う方が嘘が無い。**
       const name = state.focusId ? (state.graph.nodes[state.focusId]?.name ?? state.focusId) : undefined;
-      current.append(document.createTextNode(name ?? "全体"));
+      current.append(document.createTextNode(name ?? m.app.whole));
       bar.append(current);
     }
     const focusId = state.focusId;
     if (state.layer === "goals") {
       // 地図では俯瞰を出さない。**同じ場所で往復する**のがこの切り替えの決まりで、
       // 地図 →俯瞰 →グラフ と渡ると、押した覚えのない縮尺に降りている。
-      appendToggle("グラフ", () => goDetail());
+      appendToggle(m.app.graph, () => goDetail());
       return;
     }
     // 今いる地点の配下を俯瞰する。目的で押せば目的の配下、潜った先で押せば
     // その枝の配下——グラフが「1クリック1階層」なのに対して、こちらは
     // 今いる場所から下を一息に見る。
-    if (focusId) appendToggle("俯瞰", () => goList(focusId));
+    if (focusId) appendToggle(m.app.overview, () => goList(focusId));
     // ゴールだけの地図へ上がる（「もっと俯瞰」）。俯瞰が「ここから下を一息に」
     // なのに対して、こちらは**間のノードを畳んでゴールだけを浮上させる**。
-    if (focusId) appendToggle("地図", () => goMap());
+    if (focusId) appendToggle(m.app.map, () => goMap());
   };
 
   const renderCenter = (): void => {
@@ -2061,7 +2066,7 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       state.graph,
       result,
       {
-        title: state.query !== "" ? "検索結果" : recent ? "最近の変更" : "今やれること",
+        title: state.query !== "" ? m.app.searchResults : recent ? m.app.recentChanges : m.app.readyNow,
         query: state.query,
         ...(scope ? { scoped: true } : {}),
         ...(recent ? { recent: true, recentSort: state.recentSort } : {}),
@@ -2201,16 +2206,23 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
    * 選択肢は全部メニューに並べる。**サブ窓には出さない**（設定を書くのは本窓だけ、
    * `AppOptions.sub`）。サブ窓は本窓での切り替えに `storage` イベントで追随する。
    */
-  const THEME_CHOICES: { pref: ThemePref; label: string; icon: "monitor" | "sun" | "moon" }[] = [
-    { pref: "system", label: "OS に合わせる", icon: "monitor" },
-    { pref: "light", label: "ライト", icon: "sun" },
-    { pref: "dark", label: "ダーク", icon: "moon" },
+  const THEME_CHOICES: { pref: ThemePref; label: () => string; icon: "monitor" | "sun" | "moon" }[] = [
+    { pref: "system", label: () => m.app.themeSystem, icon: "monitor" },
+    { pref: "light", label: () => m.app.themeLight, icon: "sun" },
+    { pref: "dark", label: () => m.app.themeDark, icon: "moon" },
+  ];
+  const LANG_CHOICES: { pref: LangPref; label: () => string }[] = [
+    { pref: "system", label: () => m.app.themeSystem },
+    { pref: "ja", label: () => "日本語" },
+    { pref: "en", label: () => "English" },
   ];
   const themeBtn = el<HTMLButtonElement>("theme-btn");
   const renderThemeBtn = (): void => {
     const choice = THEME_CHOICES.find((c) => c.pref === currentThemePref()) ?? THEME_CHOICES[0]!;
-    themeBtn.replaceChildren(iconSpan(choice.icon, 15));
-    themeBtn.title = `表示: ${choice.label}`;
+    // 明るさと言語の2つを1つのボタンに入れているので、どちらかの今の値ではなく
+    // 歯車を出す（2026-10-06 のっち「ボタン一緒は混乱する」）。今の値は title に。
+    themeBtn.replaceChildren(iconSpan("settings", 15));
+    themeBtn.title = m.app.settingsTitle(choice.label(), LANG_CHOICES.find((c) => c.pref === currentLangPref())?.label() ?? "");
     themeBtn.setAttribute("aria-label", themeBtn.title);
   };
   if (persistent) {
@@ -2221,15 +2233,27 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
       openContextMenu(
         r.left,
         r.bottom + 4,
-        THEME_CHOICES.map((c) => ({
-          label: c.label,
-          icon: c.icon,
-          checked: c.pref === currentThemePref(),
-          onSelect: () => {
-            setThemePref(c.pref);
-            renderThemeBtn();
-          },
-        })),
+        [
+          ...THEME_CHOICES.map((c, i) => ({
+            ...(i === 0 ? { group: m.app.themeGroup } : {}),
+            label: c.label(),
+            icon: c.icon,
+            checked: c.pref === currentThemePref(),
+            onSelect: () => {
+              setThemePref(c.pref);
+              renderThemeBtn();
+            },
+          })),
+          // 言語（2026-10-06）。同じメニューの下の組に置く——ヘッダーにボタンを増やすほど
+          // 頻繁には触らない。言語名はどちらの言語で開いていても、その言語自身で書く。
+          ...LANG_CHOICES.map((c, i) => ({
+            label: c.label(),
+            icon: "languages" as const,
+            checked: c.pref === currentLangPref(),
+            ...(i === 0 ? { group: m.app.langGroup } : {}),
+            onSelect: () => setLangPref(c.pref),
+          })),
+        ],
       );
     });
   }

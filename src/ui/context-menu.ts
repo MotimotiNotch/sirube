@@ -33,6 +33,9 @@ export interface MenuItem {
   /** 選択肢の中から1つを選ぶメニュー（表示の切り替え）で、今選ばれているもの。
    *  `undefined` なら普通の項目。 */
   checked?: boolean;
+  /** この項目から新しい組が始まる。組の見出しを出し、先頭の組でなければ区切り線も引く。
+   *  1つのメニューに選択の組が2つ並ぶとき（設定の明るさと言語）に使う。 */
+  group?: string;
   onSelect(): void;
 }
 
@@ -60,6 +63,10 @@ export function openContextMenu(x: number, y: number, items: MenuItem[]): void {
 
   const menu = h("div", { class: "ctx-menu", role: "menu" });
   for (const item of items) {
+    if (item.group !== undefined) {
+      if (menu.childElementCount > 0) menu.append(h("div", { class: "ctx-sep", role: "separator" }));
+      menu.append(h("div", { class: "ctx-heading" }, [item.group]));
+    }
     const radio = item.checked !== undefined;
     const btn = h("button", {
       class: `ctx-item${item.danger ? " danger" : ""}`,

@@ -1,0 +1,56 @@
+// 日本語（正）。英語は ../en/inspector.ts。
+
+export const inspector = {
+  empty: "ノードを選ぶとここに出ます",
+  rename: "名前を変える",
+  numberTitle: "このノードの番号",
+  ownDue: (date: string) => `。自分の期限は ${date}`,
+  dueBadge: (date: string) => `期限 ${date}`,
+  dueFrom: (from: string, own: string) => `「${from}」に間に合わせる${own}`,
+  endlessTitle: "終わらない目的（地図から外してある根）なので、割合は出しません",
+  endlessProgress: (done: number, total: number) => `達成 ${done} 件 ／ 全 ${total} 件`,
+  unmarkDone: "達成を取り消す",
+  markDone: "達成にする",
+  breakDown: "分解する",
+  cycleTitle: "待ち合って一周しています",
+  cycleHint:
+    "このノードを2つに割ると待ち合いがほどけることがあります（例:「案件を取る」→「小さい案件」「大きい案件」）。割った先は「分解する」から足せます。",
+  more: "その他",
+  due: "期限",
+  clearDue: "期限を外す",
+  dueNoteInherited: (from: string, date: string) =>
+    `「${from}」に間に合わせる期限（${date}）が伝わっています。付けるのは、それより早い日付が外で決まっているときだけです。`,
+  dueNoteOwn: "この期限は、このノードに必要なもの（前提と中身）にも伝わります。",
+  dueNoteNone:
+    "外の都合で日付が決まっているものにだけ付けます（申告・契約更新など）。このノードに必要なものにも伝わります。近づいても催促はしません。",
+  goal: "ゴール",
+  hideFromMap: "地図から外す",
+  showOnMap: "地図に出す",
+  goalNoteRing:
+    "輪の外からは要求されていないので、輪の中で先に作ったこれがゴールに出ています。輪は分解が足りない合図です——割ると根が自然に決まります。",
+  goalNoteAuto:
+    "どこからも要求されていないので、書かなくてもゴールです。外すと地図から消えます——下に地図へ出したいものがあるなら、先にそちらを出しておいてください。",
+  goalNoteOn: "地図に出ています。ここまでの道は畳まれ、間の件数だけが線に残ります。",
+  goalNoteOffAuto: "地図から外してあります。構造はそのままで、地図と入口に出ないだけです。",
+  goalNoteOff: "地図に出したいときに押します。構造は変わりません（状態も進捗もそのまま）。",
+  colorTag: "付箋",
+  noColor: "貼らない",
+  linkHead: (title: string, count: number) => `${title}（${count}）`,
+  missing: (id: string) => `${id}（未作成）`,
+  waitingOnThis: "これを待っている",
+  partOf: "属する先",
+  note: "メモ",
+  viewMode: "閲覧",
+  editMode: "編集",
+  notePlaceholder: "このノードについてのメモ",
+  noNote: "まだメモはありません。「編集」で書けます。",
+  created: (date: string) => `作成 ${date}`,
+  updated: (date: string) => `更新 ${date}`,
+  deleteNode: "このノードを削除",
+  deleteConfirm: (name: string) => `「${name}」を削除します。直後ならヘッダーの「戻す」で戻せます。`,
+  /** 名前の並べ方。`deleteOrphans` に渡す前に、これで join する。 */
+  nameSep: "・",
+  deleteOrphans: (count: number, names: string) => `${count} 件（${names}）が目的として一覧に出るようになります。`,
+  deleteYes: "削除する",
+  deleteNo: "やめる",
+};

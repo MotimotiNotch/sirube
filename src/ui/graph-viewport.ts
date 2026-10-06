@@ -11,6 +11,8 @@
 // 移ったときだけリセットする。鍵をノード id にしていたが、地図は**どのゴールを
 // 選んでいても同じ1枚**なので、そこだけ固定の鍵を渡している（2026-09-12）。
 
+import { m } from "../i18n/index.ts";
+
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 3;
 /** ホイール1目盛りあたりの倍率の効き。大きいと1回で飛びすぎる。 */
@@ -115,7 +117,7 @@ export function mountViewport(opts: MountViewportOptions): void {
   const resetBtn = document.createElement("button");
   resetBtn.type = "button";
   resetBtn.className = "graph-reset hidden";
-  resetBtn.title = "表示を元に戻す";
+  resetBtn.title = m.graph.resetView;
   resetBtn.addEventListener("click", () => {
     st.k = st.base.k;
     st.tx = st.base.tx;

@@ -17,6 +17,7 @@
 // ダッシュの羅列に潰れてしまう。
 
 import { newNode, type Node } from "./model.ts";
+import { m } from "../i18n/index.ts";
 
 export interface DslError {
   message: string;
@@ -118,10 +119,10 @@ export function parseDsl(input: string): DslParseResult {
   const next = (): Token | undefined => tokens[pos++];
   const endPos = input.length;
 
-  const expectIdent = (context: string): Token => {
+  const expectIdent = (missing: () => string): Token => {
     const t = peek();
     if (!t || t.type !== "IDENT") {
-      throw new DslSyntaxError(`${context}にはノード名が必要です`, t?.pos ?? endPos);
+      throw new DslSyntaxError(missing(), t?.pos ?? endPos);
     }
     next();
     return t;
@@ -134,7 +135,7 @@ export function parseDsl(input: string): DslParseResult {
     while (peek()?.type === "ARROW") {
       next();
       const t = peek();
-      if (!t) throw new DslSyntaxError("'->' の後にノード名または '[' が必要です", endPos);
+      if (!t) throw new DslSyntaxError(m.dsl.nameOrBracketAfterArrow, endPos);
       if (t.type === "IDENT") {
         next();
         const target = getOrCreateNode(t.value);
@@ -142,39 +143,39 @@ export function parseDsl(input: string): DslParseResult {
         current = target;
       } else if (t.type === "LBRACKET") {
         next();
-        const innerFirstTok = expectIdent("'['");
+        const innerFirstTok = expectIdent(() => m.dsl.nameAfterBracket);
         const innerFirst = getOrCreateNode(innerFirstTok.value);
         addContains(current, innerFirst.id);
         continueChain(innerFirst);
         const close = peek();
         if (!close || close.type !== "RBRACKET") {
-          throw new DslSyntaxError("']' が閉じられていません", close?.pos ?? endPos);
+          throw new DslSyntaxError(m.dsl.unclosedBracket, close?.pos ?? endPos);
         }
         next();
         // 角括弧は横枝であって requires 連鎖の続きではないので current は据え置き。
       } else {
-        throw new DslSyntaxError("'->' の後にノード名または '[' が必要です", t.pos);
+        throw new DslSyntaxError(m.dsl.nameOrBracketAfterArrow, t.pos);
       }
     }
   };
 
   const parseChain = (): void => {
-    const first = expectIdent("式の先頭");
+    const first = expectIdent(() => m.dsl.nameAtStart);
     continueChain(getOrCreateNode(first.value));
   };
 
   const errors: DslError[] = [];
   try {
-    if (tokens.length === 0) throw new DslSyntaxError("入力が空です", 0);
+    if (tokens.length === 0) throw new DslSyntaxError(m.dsl.empty, 0);
     parseChain();
     while (peek()) {
       const t = peek()!;
       if (t.type === "COMMA") {
         next();
-        if (!peek()) throw new DslSyntaxError("',' の後にノード名が必要です", endPos);
+        if (!peek()) throw new DslSyntaxError(m.dsl.nameAfterComma, endPos);
         parseChain();
       } else {
-        throw new DslSyntaxError(`予期しないトークン: '${t.value}'`, t.pos);
+        throw new DslSyntaxError(m.dsl.unexpectedToken(t.value), t.pos);
       }
     }
   } catch (err) {

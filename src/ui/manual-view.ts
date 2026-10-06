@@ -9,6 +9,7 @@
 
 import { h, iconSpan } from "./dom.ts";
 import { renderNote } from "./note-view.ts";
+import { m } from "../i18n/index.ts";
 
 export interface ManualCallbacks {
   /** 「チュートリアルをもう一度」。渡さなければ出さない（サブ窓）。 */
@@ -25,13 +26,13 @@ export function renderManual(container: HTMLElement, text: string, cb: ManualCal
   const actions: HTMLElement[] = [];
   const { onTour, onWindow } = cb;
   if (onTour) {
-    const tour = h("button", { class: "btn", type: "button" }, ["チュートリアルをもう一度"]);
+    const tour = h("button", { class: "btn", type: "button" }, [m.manual.tourAgain]);
     tour.addEventListener("click", () => onTour());
     actions.push(tour);
   }
   if (onWindow) {
     const win = h("button", { class: "btn", type: "button" });
-    win.append(iconSpan("appWindow", 14), "別窓で開く");
+    win.append(iconSpan("appWindow", 14), m.manual.openWindow);
     win.addEventListener("click", () => onWindow());
     actions.push(win);
   }
@@ -44,7 +45,7 @@ export function renderManual(container: HTMLElement, text: string, cb: ManualCal
   // `##` を章と数えるなど、描いたものと目次がずれる。
   const chapters = Array.from(body.querySelectorAll<HTMLElement>(".note-h2"));
   if (chapters.length > 0) {
-    const toc = h("nav", { class: "manual-toc", "aria-label": "目次" });
+    const toc = h("nav", { class: "manual-toc", "aria-label": m.manual.toc });
     for (const ch of chapters) {
       const btn = h("button", { type: "button" }, [ch.textContent ?? ""]);
       btn.addEventListener("click", () => ch.scrollIntoView({ block: "start" }));

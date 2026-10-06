@@ -4,7 +4,7 @@
 // 実機の見た目・操作感は別途のっちが確認する（AI の確認だけで「完了」と
 // 言い切らない運用）。ここで担保するのは「壊れていないこと」まで。
 
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { ensureDom } from "./test-dom.ts";
 
@@ -2970,9 +2970,10 @@ describe("ライトとダークの切り替え（2026-10-06）", () => {
 
   test("ヘッダーのボタンで3択が出て、今の設定に印が付いている", () => {
     expect($("theme-btn").classList.contains("hidden")).toBe(false);
-    expect($("theme-btn").title).toBe("表示: OS に合わせる");
+    expect($("theme-btn").title).toBe("設定（明るさ: OS に合わせる、言語: OS に合わせる）");
+    expect($("theme-btn").querySelector("svg")).toBeTruthy(); // 今の値のアイコンではなく歯車
     $("theme-btn").click();
-    const items = themeItems();
+    const items = themeItems().slice(0, 3); // 下の組は言語（別の describe で見る）
     expect(items.map((b) => b.textContent)).toEqual(["OS に合わせる", "ライト", "ダーク"]);
     expect(items.map((b) => b.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
     expect(items[0]!.querySelector(".ctx-check")).toBeTruthy();
@@ -2984,7 +2985,7 @@ describe("ライトとダークの切り替え（2026-10-06）", () => {
     themeItems()[2]!.click();
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(readThemePref()).toBe("dark");
-    expect($("theme-btn").title).toBe("表示: ダーク");
+    expect($("theme-btn").title).toBe("設定（明るさ: ダーク、言語: OS に合わせる）");
     expect(document.querySelector(".ctx-menu")).toBeNull(); // 選んだら閉じる
   });
 
@@ -3007,5 +3008,64 @@ describe("ライトとダークの切り替え（2026-10-06）", () => {
     const css = await Bun.file("src/ui/style.css").text();
     expect(css).toContain(':root[data-theme="dark"]');
     expect(css).not.toMatch(/@media\s*\(prefers-color-scheme[^)]*\)\s*\{/); // コメント中の言及は数えない
+  });
+});
+
+const i18n = await import("../i18n/index.ts");
+
+describe("言語の切り替え（2026-10-06）", () => {
+  const items = (): HTMLElement[] => Array.from(document.querySelectorAll(".ctx-menu .ctx-item")) as HTMLElement[];
+  const JAPANESE = /[\u3040-\u30ff\u4e00-\u9fff]/;
+
+  beforeEach(async () => {
+    setThemePref("system");
+    i18n.setLang("ja");
+    document.body.innerHTML = HTML;
+    localStorage.clear();
+    await startApp(sampleFs());
+  });
+
+  afterEach(() => {
+    i18n.setLangPref("system", () => {});
+    i18n.setLang("ja"); // 他のテストは日本語の文言で書いてある
+  });
+
+  test("設定メニューは明るさと言語の2組で、それぞれ見出しが付き、間に区切り線が入る", () => {
+    $("theme-btn").click();
+    expect(items().map((b) => b.textContent)).toEqual(["OS に合わせる", "ライト", "ダーク", "OS に合わせる", "日本語", "English"]);
+    const headings = Array.from(document.querySelectorAll(".ctx-menu .ctx-heading")).map((e) => e.textContent);
+    expect(headings).toEqual(["明るさ", "言語"]);
+    const seps = document.querySelectorAll(".ctx-menu .ctx-sep");
+    expect(seps.length).toBe(1); // 先頭の組の前には引かない
+    expect(seps[0]!.nextElementSibling?.textContent).toBe("言語");
+    expect(items().map((b) => b.getAttribute("aria-checked")).slice(3)).toEqual(["true", "false", "false"]);
+  });
+
+  test("今と同じ言語を選んでも読み直さず、選んだ値だけ覚える", () => {
+    $("theme-btn").click();
+    items()[4]!.click(); // 日本語（今も日本語）。違う言語を選ぶと location.reload が走る
+    expect(localStorage.getItem(i18n.LANG_KEY)).toBe("ja");
+    expect(i18n.currentLangPref()).toBe("ja");
+  });
+
+  test("英語で開くと、静的な HTML の文言も差し替わり、画面の部品に日本語が残らない", async () => {
+    i18n.setLangPref("en", () => {}); // 実機では読み直しの後に initLang が当てる
+    i18n.setLang("en");
+    document.body.innerHTML = HTML;
+    await startApp(sampleFs());
+    expect($("tour-btn").textContent).toBe(i18n.m.app.help);
+    expect(JAPANESE.test(i18n.m.app.help)).toBe(false);
+    // ノード名はサンプルの日本語なので、名前を出す要素を除いた部品だけを見る
+    const chrome = (sel: string): string => {
+      const c = document.querySelector(sel)!.cloneNode(true) as Element;
+      c.querySelectorAll("#root-list, .badge").forEach((e) => e.remove());
+      return c.textContent ?? "";
+    };
+    expect(chrome("header")).not.toMatch(JAPANESE);
+    expect(chrome(".sidebar")).not.toMatch(JAPANESE);
+    // title にはノード名が入るもの（"Under <名前>"、引用符の中）がある。名前の部分を除いて見る
+    const withoutNames = (t: string): string => t.replace(/[“"][^”"]*[”"]/g, "").replace(/^Under .*$/, "");
+    const titles = Array.from(document.querySelectorAll("[title]")).map((e) => e.getAttribute("title")!).filter((t) => JAPANESE.test(withoutNames(t)));
+    expect(titles).toEqual([]);
   });
 });

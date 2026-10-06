@@ -26,6 +26,7 @@ import { applyPlan, normalizeForDuplicateCheck, planReconcile, type ReconcilePla
 import { isUlid, ulid } from "../core/ulid.ts";
 import { parseNodeFile, serializeNodeFile } from "./frontmatter.ts";
 import type { SirubeFs } from "./fs.ts";
+import { m } from "../i18n/index.ts";
 
 export interface LoadResult {
   graph: Graph;
@@ -48,7 +49,7 @@ export class MarkdownGraphStore {
       try {
         text = await this.fs.readNode(entry.id);
       } catch {
-        issues.push({ id: entry.id, problems: ["ファイルを読めませんでした"] });
+        issues.push({ id: entry.id, problems: [m.store.unreadable] });
         continue;
       }
       const { node, issues: problems } = parseNodeFile(entry.id, text, entry.mtimeMs);
@@ -89,7 +90,7 @@ export class MarkdownGraphStore {
         continue;
       }
       // 先勝ち。後から来た方を捨てて振り直す。
-      issues.push({ id, problems: [`番号 #${node.number} が「${graph.nodes[owner]!.name}」と重複していたので振り直しました`] });
+      issues.push({ id, problems: [m.store.renumbered(node.number, graph.nodes[owner]!.name)] });
       node.number = undefined;
       renumber.push(id);
     }
@@ -149,7 +150,7 @@ export class MarkdownGraphStore {
     const clash = Object.values(graph.nodes).find(
       (n) => n.id !== id && normalizeForDuplicateCheck(n.name) === key,
     );
-    if (clash) throw new Error(`「${clash.name}」と同じ名前になります`);
+    if (clash) throw new Error(m.store.nameClash(clash.name));
     node.name = trimmed;
     await this.persist(graph, [id]);
   }
@@ -181,7 +182,7 @@ export class MarkdownGraphStore {
       return node;
     }
     const detail = lastError instanceof Error ? `: ${lastError.message}` : "";
-    throw new Error(`ノード id を ${MINT_ATTEMPTS} 回採番できませんでした${detail}`);
+    throw new Error(m.store.mintFailed(MINT_ATTEMPTS, detail));
   }
 
   /** 消す。**戻すための控えも一緒に返す**（`applyToggle` と同じ理由——控えは
@@ -204,7 +205,7 @@ export class MarkdownGraphStore {
       if (other.requires.length + other.contains.length !== before) touched.push(otherId);
     }
     await this.persist(graph, touched);
-    return { touched, undo: sealUndo(graph, `「${name}」の削除`, before) };
+    return { touched, undo: sealUndo(graph, m.store.undoDelete(name), before) };
   }
 
   /** ワンタップトグル。カスケードで巻き込まれたノードも一緒に書く。 */
@@ -234,7 +235,7 @@ export class MarkdownGraphStore {
     if (parent.requires.length + parent.contains.length === before) return undefined;
     await this.persist(graph, [parentId]);
     const childName = graph.nodes[childId]?.name ?? childId;
-    return sealUndo(graph, `「${parent.name}」から「${childName}」を外したの`, snap);
+    return sealUndo(graph, m.store.undoDetach(parent.name, childName), snap);
   }
 
   /**
@@ -260,7 +261,7 @@ export class MarkdownGraphStore {
     // 控えは実際に書き換えたノードだけに絞る。触っていないものまで照合すると、
     // その後に外で書かれただけで戻せなくなる。
     const before = Object.fromEntries(touched.map((id) => [id, snap[id] ?? null]));
-    return { done, undo: sealUndo(graph, `近道 ${done.length} 本を外したの`, before) };
+    return { done, undo: sealUndo(graph, m.store.undoShortcuts(done.length), before) };
   }
 
   /**
@@ -323,14 +324,14 @@ export class MarkdownGraphStore {
   ): Promise<Node> {
     const parent = graph.nodes[parentId];
     if (!parent) throw new Error(`node "${parentId}" not found`);
-    if (!parent[kind].includes(childId)) throw new Error("その繋がりはもうありません");
+    if (!parent[kind].includes(childId)) throw new Error(m.store.linkGone);
 
     const trimmed = name.trim();
-    if (trimmed === "") throw new Error("名前を入れてください");
+    if (trimmed === "") throw new Error(m.store.nameRequired);
     // 同名は作らせない（`renameNode` と同じ理由。名前で参照を解決する経路がある）。
     const key = normalizeForDuplicateCheck(trimmed);
     const clash = Object.values(graph.nodes).find((n) => normalizeForDuplicateCheck(n.name) === key);
-    if (clash) throw new Error(`「${clash.name}」と同じ名前になります`);
+    if (clash) throw new Error(m.store.nameClash(clash.name));
 
     const node = await this.mint(graph, trimmed);
     parent[kind] = parent[kind].map((id) => (id === childId ? node.id : id));
@@ -530,7 +531,7 @@ export function resolveReferences(graph: Graph, issues: { id: string; problems: 
       const candidates = byName.get(normalizeForDuplicateCheck(ref)) ?? [];
       if (candidates.length === 1) return candidates[0]!;
       if (candidates.length > 1) {
-        addProblem(id, `「${ref}」に一致するノードが ${candidates.length} 件あるため解決できません`);
+        addProblem(id, m.store.ambiguousRef(ref, candidates.length));
       }
       return ref; // 見つからないものはそのまま（リンク切れとして自動解決が拾う）
     };
@@ -544,7 +545,7 @@ export function resolveReferences(graph: Graph, issues: { id: string; problems: 
   // 移行前の vault は `name` を持たないので、ここには引っかからない。
   for (const [id, node] of Object.entries(graph.nodes)) {
     if (!isUlid(id) && node.name !== id) {
-      addProblem(id, `ファイル名が id の形式ではありません（名前「${node.name}」が別に書かれています）`);
+      addProblem(id, m.store.notUlidFileName(node.name));
     }
   }
 }

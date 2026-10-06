@@ -22,6 +22,7 @@
 
 import { buildReverseIndex, findContainsCycles, findCycles } from "./engine.ts";
 import { newNode, type Graph } from "./model.ts";
+import { m } from "../i18n/index.ts";
 
 // ---------------------------------------------------------------------------
 // 型
@@ -375,9 +376,5 @@ export function applyPlan(g: Graph, plan: ReconcilePlan): string[] {
 
 /** 人に見せる1行サマリ。「N件解決しました。M件は判断が必要なため残しました」 */
 export function summarize(plan: ReconcilePlan): string {
-  if (plan.fixes.length === 0 && plan.unresolved.length === 0) return "不整合はありませんでした。";
-  const parts: string[] = [];
-  if (plan.fixes.length > 0) parts.push(`${plan.fixes.length}件を自動解決しました`);
-  if (plan.unresolved.length > 0) parts.push(`${plan.unresolved.length}件は判断が必要なため残しました`);
-  return `${parts.join("。")}。`;
+  return m.reconcile.summary(plan.fixes.length, plan.unresolved.length);
 }

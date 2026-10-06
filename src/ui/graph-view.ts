@@ -14,6 +14,7 @@ import { closeContextMenu, type MenuTarget } from "./context-menu.ts";
 import { hideFlyout, scheduleHideFlyout, showOutlineFlyout } from "./flyout.ts";
 import { consumeDragEnd, mountViewport } from "./graph-viewport.ts";
 import { mountLegend } from "./legend.ts";
+import { m } from "../i18n/index.ts";
 
 // ノードは「印＋その下の名前」で描く（2026-09-02、のっち判断）。箱の中に名前と
 // 数字を入れていた頃は、6個並ぶとカードの列に見えてグラフに見えなかった。
@@ -113,7 +114,7 @@ export function renderGraph(
   // 地図は現在地が無くても成り立つ——描き出し点は `overview.roots` なので、
   // 絵そのものは焦点に依存しない。詳細は焦点が木の根なので、無ければ描けない。
   if (!overview && !focus) {
-    container.append(Object.assign(document.createElement("div"), { className: "empty", textContent: "ノードが見つかりません" }));
+    container.append(Object.assign(document.createElement("div"), { className: "empty", textContent: m.graph.notFound }));
     return;
   }
 
@@ -335,7 +336,7 @@ export function renderGraph(
         t.setAttribute("text-anchor", "middle");
         t.textContent = `${hidden}`;
         const tip = document.createElementNS(svgNs, "title");
-        tip.textContent = `この2つの間に ${hidden} 件（地図では畳んでいる）`;
+        tip.textContent = m.graph.betweenTip(hidden);
         t.append(tip);
         view.append(t);
       }
@@ -350,7 +351,7 @@ export function renderGraph(
     hit.setAttribute("d", d);
     hit.setAttribute("class", "graph-edge-hit");
     const hitTitle = document.createElementNS(svgNs, "title");
-    hitTitle.textContent = `${graph.nodes[e.from]?.name ?? e.from} と ${graph.nodes[e.to]?.name ?? e.to} の間に差し込む`;
+    hitTitle.textContent = m.graph.insertBetween(graph.nodes[e.from]?.name ?? e.from, graph.nodes[e.to]?.name ?? e.to);
     hit.append(hitTitle);
     hit.addEventListener("click", () => {
       if (consumeDragEnd()) return;
@@ -374,10 +375,10 @@ export function renderGraph(
   // 地図では線が1種類に畳まれている（前提と分割の区別は縮約で消える）ので、
   // 語彙もそれに合わせて1つにする。2つ出すと、消えた区別がまだあるように読める。
   const rows: [string, number | undefined][] = overview
-    ? [["この先にあるゴール", belowY]]
+    ? [[m.graph.labelGoalsAhead, belowY]]
     : [
-        ["これが必要（前提）", belowY],
-        ["これで構成（内包）", containsY],
+        [m.graph.labelRequires, belowY],
+        [m.graph.labelContains, containsY],
       ];
   for (const [label, rowY] of rows) {
     if (rowY === undefined) continue;
@@ -468,8 +469,8 @@ export function renderGraph(
       track.setAttribute("r", String(ringR));
       const ringTitle = document.createElementNS(svgNs, "title");
       ringTitle.textContent = endless
-        ? `下で達成 ${below.done} 件 ／ 全 ${below.total} 件`
-        : `下に ${below.done}/${below.total}`;
+        ? m.graph.ringEndless(below.done, below.total)
+        : m.graph.ring(below.done, below.total);
       track.append(ringTitle);
       g.append(track);
       // 0% のときは軌道だけ。長さ0の破線は丸い点になって「少し進んでいる」
@@ -500,8 +501,8 @@ export function renderGraph(
       // 地図では「いくつのゴールがここを通るか」。縮約しても合流は残るので、
       // 入次数＝優先度という読み方が上の層でもそのまま通る。
       mergeTitle.textContent = overview
-        ? `${inDeg} つのゴールがここを通る`
-        : `${inDeg} 箇所から要求されている（片付けると ${inDeg} つ進む）`;
+        ? m.graph.mergeMap(inDeg)
+        : m.graph.mergeDetail(inDeg);
       merge.append(mergeTitle);
       g.append(merge);
     }
@@ -619,9 +620,9 @@ export function renderGraph(
     hint.className = "empty";
     hint.textContent = overview
       ? boxes.length === 0
-        ? "地図に出すゴールがまだありません。"
-        : "地図に出ているゴールは1件だけです。「グラフ」に切り替えると中を分解できます。"
-      : "このノードにはまだ下がありません。右のパネルの「分解する」から、何が必要かを足せます。";
+        ? m.graph.noGoals
+        : m.graph.oneGoal
+      : m.graph.noChildren;
     container.append(hint);
   }
 }

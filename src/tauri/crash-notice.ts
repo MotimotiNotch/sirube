@@ -8,6 +8,7 @@
 // 閉じれば次から出ない。
 
 import { h, toast } from "../ui/dom.ts";
+import { m } from "../i18n/index.ts";
 
 export interface StoredReport {
   name: string;
@@ -17,34 +18,34 @@ export interface StoredReport {
 export function showCrashNotice(reports: readonly StoredReport[]): void {
   const all = reports.map((r) => `# ${r.name}\n\n${r.body}`).join("\n\n---\n\n");
 
-  const box = h("div", { class: "crash-notice", role: "alertdialog", "aria-label": "異常終了の記録" });
+  const box = h("div", { class: "crash-notice", role: "alertdialog", "aria-label": m.crash.noticeAria });
   const title = h("div", { class: "crash-notice-title" }, [
-    reports.length === 1 ? "前回、異常が記録されました" : `前回までに、異常が ${reports.length} 件記録されました`,
+    m.crash.noticeTitle(reports.length),
   ]);
   const lead = h("p", { class: "crash-notice-lead" }, [
-    "画面が止まった・消えたときの記録です。外へは送っていません。直すときに全文をコピーして渡してください。",
+    m.crash.noticeLead,
   ]);
 
   const detail = h("pre", { class: "crash-notice-body" }, [all]);
   detail.hidden = true;
 
-  const copy = h("button", { class: "btn primary", type: "button" }, ["全文をコピー"]);
+  const copy = h("button", { class: "btn primary", type: "button" }, [m.crash.copyAll]);
   copy.addEventListener("click", () => {
     navigator.clipboard.writeText(all).then(
-      () => toast("記録をコピーしました"),
+      () => toast(m.crash.copied),
       () => {
         // コピーできない環境でも、全文を開けば選んで写せる。
         detail.hidden = false;
-        toast("コピーできませんでした。下の全文を選んでコピーしてください");
+        toast(m.crash.copyFailed);
       },
     );
   });
-  const show = h("button", { class: "btn", type: "button" }, ["中身を見る"]);
+  const show = h("button", { class: "btn", type: "button" }, [m.crash.show]);
   show.addEventListener("click", () => {
     detail.hidden = !detail.hidden;
-    show.textContent = detail.hidden ? "中身を見る" : "中身を隠す";
+    show.textContent = detail.hidden ? m.crash.show : m.crash.hide;
   });
-  const close = h("button", { class: "btn", type: "button" }, ["閉じる"]);
+  const close = h("button", { class: "btn", type: "button" }, [m.crash.close]);
   close.addEventListener("click", () => box.remove());
 
   const actions = h("div", { class: "crash-notice-actions" }, [copy, show, close]);

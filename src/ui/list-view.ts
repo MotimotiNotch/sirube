@@ -17,6 +17,7 @@
 import { isGoalColor, type GoalColor, type Graph } from "../core/model.ts";
 import type { RecentSort, RecentSortKey, SearchResult } from "../core/search.ts";
 import { formatDate, formatDateTime, h, iconSpan, stateBadge } from "./dom.ts";
+import { m } from "../i18n/index.ts";
 
 export interface ListCallbacks {
   onSelect(id: string): void;
@@ -27,19 +28,19 @@ export interface ListCallbacks {
 
 /** 「最近の変更」の列。見出しと行を同じ5列の grid に載せる（`.recent`）。
  *  名前は並べ替えない——名前順に並んでも再開の手がかりにならない。 */
-const RECENT_COLUMNS: { label: string; key?: RecentSortKey }[] = [
-  { label: "番号", key: "number" },
-  { label: "名前" },
-  { label: "目的", key: "goal" },
-  { label: "状態", key: "state" },
-  { label: "更新日", key: "mtime" },
+const RECENT_COLUMNS: { label: () => string; key?: RecentSortKey }[] = [
+  { label: () => m.list.colNumber, key: "number" },
+  { label: () => m.list.colName },
+  { label: () => m.list.colGoal, key: "goal" },
+  { label: () => m.list.colState, key: "state" },
+  { label: () => m.list.colUpdated, key: "mtime" },
 ];
 
 function recentHeader(sort: RecentSort, cb: ListCallbacks): HTMLElement {
   const row = h("div", { class: "list-cols recent" });
   for (const col of RECENT_COLUMNS) {
     if (!col.key) {
-      row.append(h("span", { class: "list-col" }, [col.label]));
+      row.append(h("span", { class: "list-col" }, [col.label()]));
       continue;
     }
     const key = col.key;
@@ -49,9 +50,9 @@ function recentHeader(sort: RecentSort, cb: ListCallbacks): HTMLElement {
       type: "button",
       "data-sort": key,
       "aria-pressed": String(active),
-      title: `${col.label}で並べ替え`,
+      title: m.list.sortBy(col.label()),
     });
-    btn.append(h("span", {}, [col.label]));
+    btn.append(h("span", {}, [col.label()]));
     // 向きの印は並べている列にだけ出す。全列に薄く出すと、どれで並んでいるかが
     // 印の濃さの差でしか読めなくなる。
     if (active) btn.append(iconSpan(sort.dir === "asc" ? "chevronUp" : "chevronDown", 12));
@@ -69,13 +70,13 @@ function recentHeader(sort: RecentSort, cb: ListCallbacks): HTMLElement {
  *  ——見出しを付けなかったのはこのためで、列を揃えることに反対していたわけでは
  *  なかった。**全行で空になる列は出さない**（原則2）。合流が1件も無ければ合流の列ごと消す。 */
 type PlainCol = "number" | "name" | "indegree" | "due" | "goal" | "state";
-const PLAIN_COLUMNS: Record<PlainCol, { label: string; width: string }> = {
-  number: { label: "番号", width: "46px" },
-  name: { label: "名前", width: "minmax(84px, 2fr)" },
-  indegree: { label: "合流", width: "52px" },
-  due: { label: "期限", width: "84px" },
-  goal: { label: "目的", width: "minmax(0, 1fr)" },
-  state: { label: "状態", width: "108px" },
+const PLAIN_COLUMNS: Record<PlainCol, { label: () => string; width: string }> = {
+  number: { label: () => m.list.colNumber, width: "46px" },
+  name: { label: () => m.list.colName, width: "minmax(84px, 2fr)" },
+  indegree: { label: () => m.list.colShared, width: "52px" },
+  due: { label: () => m.list.colDue, width: "84px" },
+  goal: { label: () => m.list.colGoal, width: "minmax(0, 1fr)" },
+  state: { label: () => m.list.colState, width: "108px" },
 };
 
 export function renderList(
@@ -96,7 +97,7 @@ export function renderList(
   // **インスペクタのバー**が同じ数を既に出しており、3つ並べた画面を実際に
   // 作ってしまった（2026-09-02 の棚卸しで実測。`4/11` が同時に3箇所）。
   if (isSearch) {
-    container.append(h("div", { class: "list-head" }, [h("span", { class: "list-count" }, [`${result.total} 件`])]));
+    container.append(h("div", { class: "list-head" }, [h("span", { class: "list-count" }, [m.list.count(result.total)])]));
   }
 
   // 詰まっている輪は結果より先に出す。「今やれることが空」の理由が
@@ -107,12 +108,12 @@ export function renderList(
 
   if (result.hits.length === 0) {
     const msg = isSearch
-      ? "一致するノードがありません。"
+      ? m.list.noMatch
       : recent
-        ? "まだ書き換わったノードがありません。"
+        ? m.list.noRecent
         : result.cycles.length > 0
-        ? "今やれることがありません。上の待ち合いをほどくと動き出します。"
-        : "今やれることがありません。";
+        ? m.list.noneReadyCycle
+        : m.list.noneReady;
     container.append(h("div", { class: "empty" }, [msg]));
     return;
   }
@@ -142,7 +143,7 @@ export function renderList(
   const plainStyle = `--list-cols: ${plainCols.map((c) => PLAIN_COLUMNS[c].width).join(" ")}`;
   if (!recent) {
     const head = h("div", { class: "list-cols plain", style: plainStyle });
-    for (const c of plainCols) head.append(h("span", { class: "list-col" }, [PLAIN_COLUMNS[c].label]));
+    for (const c of plainCols) head.append(h("span", { class: "list-col" }, [PLAIN_COLUMNS[c].label()]));
     container.append(head);
   }
 
@@ -192,13 +193,13 @@ export function renderList(
           .sort((a, b) => a.localeCompare(b, "ja"))
           .join(" / ");
     const crumb = h("span", { class: "hit-crumb" }, [crumbText]);
-    if (crumbText) crumb.title = `${crumbText} の下`;
+    if (crumbText) crumb.title = m.list.under(crumbText);
 
     // 列の見出しが「合流」と言うので、表の形（今やれること）では数だけ出す。
     const indegreeEl =
       hit.inDegree > 1
-        ? h("span", { class: "hit-indegree", title: `${hit.inDegree} 箇所から要求されている（片付けると複数が進む）` }, [
-            recent ? `合流 ${hit.inDegree}` : String(hit.inDegree),
+        ? h("span", { class: "hit-indegree", title: m.list.sharedTitle(hit.inDegree) }, [
+            recent ? m.list.sharedBadge(hit.inDegree) : String(hit.inDegree),
           ])
         : undefined;
     // 上から伝わった期限は枠を破線にして、どこから来たかをツールチップで言う。
@@ -208,7 +209,7 @@ export function renderList(
       const from = hit.dueFrom ? graph.nodes[hit.dueFrom]?.name ?? hit.dueFrom : undefined;
       dueEl = h(
         "span",
-        { class: from ? "hit-indegree due-inherited" : "hit-indegree", title: from ? `期限は「${from}」に間に合わせる` : "期限" },
+        { class: from ? "hit-indegree due-inherited" : "hit-indegree", title: from ? m.list.dueFrom(from) : m.list.due },
         [hit.due],
       );
     }
@@ -227,7 +228,7 @@ export function renderList(
       main.append(nameCell, crumb, h("span", { class: "hit-state" }, [stateBadge(hit.state)]));
       // 日付だけ出して時刻はツールチップ（詳細パネルと同じ出し方）。
       const date = h("span", { class: "hit-date" }, node.mtimeMs > 0 ? [formatDate(node.mtimeMs)] : []);
-      if (node.mtimeMs > 0) date.title = `更新 ${formatDateTime(node.mtimeMs)}`;
+      if (node.mtimeMs > 0) date.title = m.list.updated(formatDateTime(node.mtimeMs));
       main.append(date);
     } else {
       // 列は見出しと同じ並び。出ている列には、値が無くても空の枠を置く。
@@ -250,10 +251,10 @@ export function renderList(
     // 「今やれること」では思い出す対象が無いので出さない。
     if (isSearch && hit.neighbors) {
       const groups: [string, string[], Parameters<typeof iconSpan>[0]][] = [
-        ["これが必要", hit.neighbors.requires, "cornerDownRight"],
-        ["これを待っている", hit.neighbors.requiredBy, "listChecks"],
-        ["構成要素", hit.neighbors.contains, "layers"],
-        ["属する先", hit.neighbors.containedBy, "chevronRight"],
+        [m.list.needs, hit.neighbors.requires, "cornerDownRight"],
+        [m.list.waitingOnThis, hit.neighbors.requiredBy, "listChecks"],
+        [m.list.parts, hit.neighbors.contains, "layers"],
+        [m.list.partOf, hit.neighbors.containedBy, "chevronRight"],
       ];
       const shown = groups.filter(([, ids]) => ids.length > 0);
       if (shown.length > 0) {
@@ -289,7 +290,7 @@ function cycleNotice(graph: Graph, cycle: string[], cb: ListCallbacks): HTMLElem
 
   const head = h("div", { class: "cycle-head" });
   const title = h("h3");
-  title.append(iconSpan("repeat", 14), "この待ち合いの中に、2つに分かれるノードがあるかもしれません");
+  title.append(iconSpan("repeat", 14), m.list.cycleTitle);
   head.append(title);
 
   const ring = h("div", { class: "cycle-ring" });
@@ -302,18 +303,16 @@ function cycleNotice(graph: Graph, cycle: string[], cb: ListCallbacks): HTMLElem
   ring.append(iconSpan("repeat", 12));
 
   const act = h("button", { class: "btn", type: "button" });
-  act.append(iconSpan("plus", 13), "割る");
+  act.append(iconSpan("plus", 13), m.list.split);
   act.addEventListener("click", () => cb.onDecompose(cycle));
 
   const row = h("div", { class: "cycle-row" });
   row.append(ring, act);
 
   const why = h("details", { class: "cycle-why" });
-  why.append(h("summary", {}, ["なぜ待ち合って一周するのか"]));
+  why.append(h("summary", {}, [m.list.cycleWhy]));
   why.append(
-    h("p", {}, [
-      "待ち合って一周するのは、1つの名前に2つの違うものが混ざっているサインです。どれかを割ると要求の向きが揃ってほどけます。",
-    ]),
+    h("p", {}, [m.list.cycleWhyBody]),
   );
 
   box.append(head, row, why);

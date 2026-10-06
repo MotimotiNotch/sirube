@@ -10,6 +10,7 @@
 
 import type { NodeState } from "../core/model.ts";
 import { STATE_LABEL, h, iconSpan } from "./dom.ts";
+import { m } from "../i18n/index.ts";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -108,24 +109,24 @@ export function mountLegend(host: HTMLElement, map = false): void {
   // 地図の線は縮約で1種類に畳まれた点線なのに、凡例は実線＝前提／破線＝内包を
   // 出したままだった。**画面に無いものを説明し、出ている数字を説明していない。**
   if (map) {
-    panel.append(row(edgeSample("goal"), "この先にあるゴール"));
-    panel.append(row(betweenSample(), "線の上の数字は、間に畳んだ件数"));
+    panel.append(row(edgeSample("goal"), m.legend.goalsAhead));
+    panel.append(row(betweenSample(), m.legend.betweenCount));
   } else {
-    panel.append(row(edgeSample("requires"), "これが必要（前提）"));
-    panel.append(row(edgeSample("contains"), "これで構成（内包）"));
+    panel.append(row(edgeSample("requires"), m.legend.requires));
+    panel.append(row(edgeSample("contains"), m.legend.contains));
   }
   panel.append(h("div", { class: "legend-sep" }, []));
-  panel.append(row(ringSample(), "下にあるものの進み具合"));
+  panel.append(row(ringSample(), m.legend.ring));
   panel.append(
     h("div", { class: "legend-row" }, [
       h("span", { class: "legend-mark legend-merge" }, ["2"]),
       // 入次数の読み方も縮尺で変わる。詳細では優先度（片付けると何個進むか）、
       // 地図では通り道の数。ノードのツールチップと同じ言い方に揃える。
-      h("span", {}, [map ? "いくつのゴールがここを通るか" : "何箇所から要求されているか"]),
+      h("span", {}, [map ? m.legend.mergeMap : m.legend.mergeDetail]),
     ]),
   );
 
-  const btn = h("button", { class: "legend-btn", type: "button", title: "凡例" });
+  const btn = h("button", { class: "legend-btn", type: "button", title: m.legend.button });
   btn.append(iconSpan("info", 14));
 
   let pinned = false;

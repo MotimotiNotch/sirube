@@ -1,0 +1,32 @@
+// 日本語（正）。英語は ../en/list.ts。
+
+export const list = {
+  colNumber: "番号",
+  colName: "名前",
+  colGoal: "目的",
+  colState: "状態",
+  colUpdated: "更新日",
+  colShared: "合流",
+  colDue: "期限",
+  sortBy: (label: string) => `${label}で並べ替え`,
+  count: (n: number) => `${n} 件`,
+  noMatch: "一致するノードがありません。",
+  noRecent: "まだ書き換わったノードがありません。",
+  noneReadyCycle: "今やれることがありません。上の待ち合いをほどくと動き出します。",
+  noneReady: "今やれることがありません。",
+  under: (crumb: string) => `${crumb} の下`,
+  sharedTitle: (n: number) => `${n} 箇所から要求されている（片付けると複数が進む）`,
+  sharedBadge: (n: number) => `合流 ${n}`,
+  dueFrom: (from: string) => `期限は「${from}」に間に合わせる`,
+  due: "期限",
+  updated: (dateTime: string) => `更新 ${dateTime}`,
+  needs: "これが必要",
+  waitingOnThis: "これを待っている",
+  parts: "構成要素",
+  partOf: "属する先",
+  cycleTitle: "この待ち合いの中に、2つに分かれるノードがあるかもしれません",
+  split: "割る",
+  cycleWhy: "なぜ待ち合って一周するのか",
+  cycleWhyBody:
+    "待ち合って一周するのは、1つの名前に2つの違うものが混ざっているサインです。どれかを割ると要求の向きが揃ってほどけます。",
+};

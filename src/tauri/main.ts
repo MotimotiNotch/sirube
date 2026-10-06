@@ -16,8 +16,10 @@ import { getVersion } from "@tauri-apps/api/app";
 import { formatCrumbs, installCrashCapture } from "../ui/crash.ts";
 import { showCrashNotice } from "./crash-notice.ts";
 import { initTheme } from "../ui/theme.ts";
+import { initLang } from "../i18n/index.ts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { routeExternalLinks } from "../ui/external-links.ts";
+import { m } from "../i18n/index.ts";
 
 const VAULT_KEY = "sirube.vaultPath";
 /** 今どの vault を開いているかを、**アプリの外から読める場所**に置くファイル。
@@ -57,7 +59,7 @@ async function publishVaultPointer(path: string): Promise<void> {
 async function resolveVault(): Promise<string | undefined> {
   const saved = localStorage.getItem(VAULT_KEY);
   if (saved) return saved;
-  return pickVault("Sirube のデータを置くフォルダを選んでください");
+  return pickVault(m.crash.pickVaultFirst);
 }
 
 /** 開くフォルダを入れ替える（Obsidian の vault 切り替えと同じ形）。
@@ -66,7 +68,7 @@ async function resolveVault(): Promise<string | undefined> {
  * 組み上がるので、途中で fs だけ挿し替えると古い状態がどこかに残る。
  * キャンセルされたときは何もしない——保存済みのパスも書き換えない。 */
 async function switchVault(): Promise<void> {
-  const picked = await pickVault("開くフォルダを選んでください");
+  const picked = await pickVault(m.crash.pickVaultSwitch);
   if (!picked) return;
   // サブ窓は開いたときの vault を指し続けるので、残すと別のフォルダの窓が並ぶ。
   await closeSubWindows();
@@ -99,7 +101,7 @@ function openWindow(target: WindowTarget, vault: string): void {
     minHeight: 560,
   });
   void w.once("tauri://error", (e) => {
-    toast(`別窓を開けませんでした（${String(e.payload)}）`);
+    toast(m.crash.windowFailed(String(e.payload)));
   });
 }
 
@@ -112,6 +114,7 @@ function showFatal(message: string): void {
 }
 
 initTheme(); // vault を読む前に（読み込み中ずっとライトで光らないように）
+initLang(); // 描画より前に辞書を決める（フォルダ選択の文言もこれに従う）
 routeExternalLinks(openUrl); // メモやマニュアルのリンクは既定のブラウザで
 
 const query = parseWindowQuery(location.search);
@@ -142,7 +145,7 @@ if (!query.sub) {
 const vault = query.sub ? query.vault : await resolveVault();
 if (vault && !query.sub) void publishVaultPointer(vault);
 if (!vault) {
-  showFatal("フォルダが選ばれなかったため起動できませんでした。ウィンドウを閉じてもう一度開いてください。");
+  showFatal(m.crash.noVault);
 } else {
   try {
     // fs プラグインのスコープに vault を入れてから触る。これを飛ばすと読み書きが
@@ -178,16 +181,12 @@ if (!vault) {
       });
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      toast(`外部変更の自動反映が使えません（${detail}）。編集したら手動で開き直してください。`);
+      toast(m.crash.watchFailed(detail));
     }
   } catch (err) {
     // 黙って空の画面を出さない。「フォルダを間違えた」と「まだ何も無い」が
     // 区別できない状態こそが、この起動で一番時間を溶かしたものだった。
     const detail = err instanceof Error ? err.message : String(err);
-    showFatal(`vault を開けませんでした。
-
-${vault}
-
-${detail}`);
+    showFatal(m.crash.openFailed(vault, detail));
   }
 }

@@ -20,6 +20,7 @@ import { descendantOutline, descendantProgress, type OutlineItem } from "../core
 import type { Graph } from "../core/model.ts";
 import { isEndlessRoot } from "../core/goals.ts";
 import { h, iconSpan } from "./dom.ts";
+import { m } from "../i18n/index.ts";
 
 /** 字下げの上限。これ以上は深さを数字で出す——字下げを積み続けると横に溢れ、
  *  字下げ自体が読めなくなる。深さの情報は数字側に残る。 */
@@ -59,7 +60,7 @@ function row(graph: Graph, item: OutlineItem, onPick: (id: string) => void): HTM
   });
 
   if (item.depth >= INDENT_CAP) {
-    el.append(h("span", { class: "fly-depth", title: `${item.depth + 1} 段下` }, [String(item.depth + 1)]));
+    el.append(h("span", { class: "fly-depth", title: m.flyout.depth(item.depth + 1) }, [String(item.depth + 1)]));
   }
   const mark = iconSpan(item.done ? "circleCheck" : "circle", 12);
   // 済みの印は達成の色を使う。ここは本体の状態（4値）ではなく「中身が揃って
@@ -68,7 +69,7 @@ function row(graph: Graph, item: OutlineItem, onPick: (id: string) => void): HTM
   mark.classList.add(item.done ? "fly-done" : "fly-todo");
   el.append(mark);
   el.append(h("span", { class: "fly-name" }, [name]));
-  if (item.repeat) el.append(h("span", { class: "fly-tag" }, ["既出"]));
+  if (item.repeat) el.append(h("span", { class: "fly-tag" }, [m.flyout.repeat]));
   else el.append(iconSpan("chevronRight", 12));
 
   if (clickable) {
@@ -103,10 +104,10 @@ export function showOutlineFlyout(
 
   const c = descendantProgress(graph, nodeId);
   const head = h("div", { class: "fly-head" });
-  head.append(iconSpan("layers", 12), h("span", {}, ["下にあるもの（クリックで直接ジャンプ）"]));
+  head.append(iconSpan("layers", 12), h("span", {}, [m.flyout.head]));
   // 終わらない根は分数にしない（`isEndlessRoot`）。件数は2つとも残す。
   head.append(
-    h("span", { class: "fly-count" }, [isEndlessRoot(graph, nodeId) ? `達成 ${c.done} ／ 全 ${c.total}` : `${c.done}/${c.total}`]),
+    h("span", { class: "fly-count" }, [isEndlessRoot(graph, nodeId) ? m.flyout.countEndless(c.done, c.total) : `${c.done}/${c.total}`]),
   );
 
   fly.replaceChildren(head, ...items.map((it) => row(graph, it, onPick)));

@@ -11,8 +11,10 @@ import { startApp } from "../ui/app.ts";
 import { buildWindowQuery, parseWindowQuery } from "../ui/window-query.ts";
 import { HttpFs } from "./http-fs.ts";
 import { initTheme } from "../ui/theme.ts";
+import { initLang } from "../i18n/index.ts";
 
 initTheme(); // vault を読む前に（読み込み中ずっとライトで光らないように）
+initLang(); // 描画より前に辞書を決める
 const query = parseWindowQuery(location.search);
 await startApp(new HttpFs(), {
   openWindow: (target) => {

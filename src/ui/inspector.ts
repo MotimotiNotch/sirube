@@ -10,6 +10,7 @@ import { nodeCreatedAt } from "../core/ulid.ts";
 import { COLOR_LABEL, formatDate, formatDateTime, h, iconSpan, stateBadge, stateDot } from "./dom.ts";
 import type { MenuTarget } from "./context-menu.ts";
 import { renderNote } from "./note-view.ts";
+import { m } from "../i18n/index.ts";
 
 export interface InspectorCallbacks {
   onToggle(id: string): void;
@@ -59,7 +60,7 @@ export function renderInspector(
   container.replaceChildren();
 
   if (!selectedId || !graph.nodes[selectedId]) {
-    container.append(h("div", { class: "insp-empty" }, ["ノードを選ぶとここに出ます"]));
+    container.append(h("div", { class: "insp-empty" }, [m.inspector.empty]));
     return;
   }
   const node = graph.nodes[selectedId];
@@ -71,7 +72,7 @@ export function renderInspector(
   // 入力欄に差し替えるのは、改名が「開いて確認して閉じる」ほどの操作ではないため。
   const nameRow = h("div", { class: "insp-name-row" });
   const nameEl = h("h3", { class: "insp-name" }, [node.name]);
-  const renameBtn = h("button", { class: "icon-btn", type: "button", title: "名前を変える" });
+  const renameBtn = h("button", { class: "icon-btn", type: "button", title: m.inspector.rename });
   renameBtn.append(iconSpan("pencil", 13));
   const startRename = (): void => {
     const input = h("input", { class: "insp-rename", type: "text" }) as HTMLInputElement;
@@ -102,7 +103,7 @@ export function renderInspector(
   const row = h("div", { class: "insp-row" });
   // 番号はここに置く。見出し（名前）の横に出すと改名の入力欄と場所を取り合う。
   if (node.number !== undefined) {
-    row.append(h("span", { class: "insp-number", title: "このノードの番号" }, [`#${node.number}`]));
+    row.append(h("span", { class: "insp-number", title: m.inspector.numberTitle }, [`#${node.number}`]));
   }
   row.append(stateBadge(state));
   // 期限は上から伝わったものも出す（`effectiveDues`）。どこから来たかは文字で言う
@@ -113,11 +114,11 @@ export function renderInspector(
   let dueFrom: HTMLElement | undefined;
   if (due && due.from !== selectedId) {
     const from = graph.nodes[due.from]?.name ?? due.from;
-    const own = node.due && node.due !== due.date ? `。自分の期限は ${node.due}` : "";
-    row.append(h("span", { class: "hit-indegree due-inherited" }, [`期限 ${due.date}`]));
-    dueFrom = h("div", { class: "insp-due-from" }, [`「${from}」に間に合わせる${own}`]);
+    const own = node.due && node.due !== due.date ? m.inspector.ownDue(node.due) : "";
+    row.append(h("span", { class: "hit-indegree due-inherited" }, [m.inspector.dueBadge(due.date)]));
+    dueFrom = h("div", { class: "insp-due-from" }, [m.inspector.dueFrom(from, own)]);
   } else if (due || node.due) {
-    row.append(h("span", { class: "hit-indegree" }, [`期限 ${due?.date ?? node.due}`]));
+    row.append(h("span", { class: "hit-indegree" }, [m.inspector.dueBadge((due?.date ?? node.due)!)]));
   }
   container.append(row);
   if (dueFrom) container.append(dueFrom);
@@ -129,8 +130,8 @@ export function renderInspector(
     // 全体の数は「どこまで」ではなく「どれだけ広がったか」を言う（`isEndlessRoot`）。
     const prow = h("div", { class: "insp-row" });
     prow.append(
-      h("span", { class: "progress-label", title: "終わらない目的（地図から外してある根）なので、割合は出しません" }, [
-        `達成 ${p.done} 件 ／ 全 ${p.total} 件`,
+      h("span", { class: "progress-label", title: m.inspector.endlessTitle }, [
+        m.inspector.endlessProgress(p.done, p.total),
       ]),
     );
     container.append(prow);
@@ -145,12 +146,12 @@ export function renderInspector(
   // 主要な操作
   const actions = h("div", { class: "insp-row" });
   const toggle = h("button", { class: `btn${state === "SATISFIED" ? "" : " primary"}`, type: "button", "data-tour": "toggle" });
-  toggle.append(iconSpan("circleCheck", 14), state === "SATISFIED" ? "達成を取り消す" : "達成にする");
+  toggle.append(iconSpan("circleCheck", 14), state === "SATISFIED" ? m.inspector.unmarkDone : m.inspector.markDone);
   toggle.addEventListener("click", () => cb.onToggle(selectedId));
   actions.append(toggle);
 
   const bulk = h("button", { class: "btn", type: "button", "data-tour": "decompose" });
-  bulk.append(iconSpan("plus", 14), "分解する");
+  bulk.append(iconSpan("plus", 14), m.inspector.breakDown);
   bulk.addEventListener("click", () => cb.onBulkAdd(selectedId));
   actions.append(bulk);
   container.append(actions);
@@ -158,12 +159,10 @@ export function renderInspector(
   if (state === "CYCLIC") {
     const warn = h("div", { class: "cycle-notice" });
     const t = h("h3");
-    t.append(iconSpan("repeat", 14), "待ち合って一周しています");
+    t.append(iconSpan("repeat", 14), m.inspector.cycleTitle);
     warn.append(t);
     warn.append(
-      h("p", {}, [
-        "このノードを2つに割ると待ち合いがほどけることがあります（例:「案件を取る」→「小さい案件」「大きい案件」）。割った先は「分解する」から足せます。",
-      ]),
+      h("p", {}, [m.inspector.cycleHint]),
     );
     container.append(warn);
   }
@@ -180,7 +179,7 @@ export function renderInspector(
     "data-tour": "more",
     "aria-expanded": view.moreOpen ? "true" : "false",
   });
-  moreBtn.append(iconSpan("chevronRight", 12), "その他");
+  moreBtn.append(iconSpan("chevronRight", 12), m.inspector.more);
   moreBtn.addEventListener("click", () => cb.onMore(!view.moreOpen));
   // 畳んでいるときは**中身を作らない**（`display:none` で隠さない）。隠すだけだと
   // 「画面に無いのに探すと見つかる」ものになり、テストからも人からも同じに見えない。
@@ -200,11 +199,11 @@ export function renderInspector(
   {
     const sec = h("div", { class: "insp-section" });
     const head = h("h4");
-    head.append(iconSpan("calendar", 12), "期限");
+    head.append(iconSpan("calendar", 12), m.inspector.due);
     sec.append(head);
 
     const row = h("div", { class: "insp-due-row" });
-    const input = h("input", { class: "insp-due-input", type: "date", "aria-label": "期限" }) as HTMLInputElement;
+    const input = h("input", { class: "insp-due-input", type: "date", "aria-label": m.inspector.due }) as HTMLInputElement;
     input.value = node.due && DUE_FORMAT.test(node.due) ? node.due : "";
     // 日付が1つ決まるたびに `change` が来る（年月日が揃うまでは来ない）。空に
     // されたら外す。形が崩れた値はここでは書かない——伝播は `YYYY-MM-DD` しか
@@ -216,7 +215,7 @@ export function renderInspector(
     });
     row.append(input);
     if (node.due !== undefined) {
-      const clear = h("button", { class: "btn", type: "button" }, ["期限を外す"]);
+      const clear = h("button", { class: "btn", type: "button" }, [m.inspector.clearDue]);
       clear.addEventListener("click", () => cb.onDue(selectedId, undefined));
       row.append(clear);
     }
@@ -226,10 +225,10 @@ export function renderInspector(
     // 外で決まっている」ときだけ。遅い日付を付けても効かない（早い方が効く）。
     const inherited = due && due.from !== selectedId ? due : undefined;
     const note = inherited
-      ? `「${graph.nodes[inherited.from]?.name ?? inherited.from}」に間に合わせる期限（${inherited.date}）が伝わっています。付けるのは、それより早い日付が外で決まっているときだけです。`
+      ? m.inspector.dueNoteInherited(graph.nodes[inherited.from]?.name ?? inherited.from, inherited.date)
       : node.due !== undefined
-        ? "この期限は、このノードに必要なもの（前提と中身）にも伝わります。"
-        : "外の都合で日付が決まっているものにだけ付けます（申告・契約更新など）。このノードに必要なものにも伝わります。近づいても催促はしません。";
+        ? m.inspector.dueNoteOwn
+        : m.inspector.dueNoteNone;
     sec.append(h("p", { class: "insp-note" }, [note]));
     moreBody.append(sec);
   }
@@ -249,11 +248,11 @@ export function renderInspector(
     const on = isGoal(graph, selectedId, rev);
     const sec = h("div", { class: "insp-section" });
     const head = h("h4");
-    head.append(iconSpan("compass", 12), "ゴール");
+    head.append(iconSpan("compass", 12), m.inspector.goal);
     sec.append(head);
 
     const btn = h("button", { class: `btn${on ? " primary" : ""}`, type: "button", "aria-pressed": on ? "true" : "false" });
-    btn.append(iconSpan("compass", 14), on ? "地図から外す" : "地図に出す");
+    btn.append(iconSpan("compass", 14), on ? m.inspector.hideFromMap : m.inspector.showOnMap);
     btn.addEventListener("click", () => cb.onGoal(selectedId, !on));
     sec.append(btn);
 
@@ -264,12 +263,12 @@ export function renderInspector(
         ? inDegree(selectedId, rev) > 0
           ? // 輪の代表（`isAutoGoal`）。「どこからも要求されていない」と書くと、
             // 画面に見えている輪の線と食い違う。
-            "輪の外からは要求されていないので、輪の中で先に作ったこれがゴールに出ています。輪は分解が足りない合図です——割ると根が自然に決まります。"
-          : "どこからも要求されていないので、書かなくてもゴールです。外すと地図から消えます——下に地図へ出したいものがあるなら、先にそちらを出しておいてください。"
-        : "地図に出ています。ここまでの道は畳まれ、間の件数だけが線に残ります。"
+            m.inspector.goalNoteRing
+          : m.inspector.goalNoteAuto
+        : m.inspector.goalNoteOn
       : auto
-        ? "地図から外してあります。構造はそのままで、地図と入口に出ないだけです。"
-        : "地図に出したいときに押します。構造は変わりません（状態も進捗もそのまま）。";
+        ? m.inspector.goalNoteOffAuto
+        : m.inspector.goalNoteOff;
     sec.append(h("p", { class: "insp-note" }, [note]));
     moreBody.append(sec);
   }
@@ -289,7 +288,7 @@ export function renderInspector(
   if (isGoal(graph, selectedId, rev)) {
     const sec = h("div", { class: "insp-section" });
     const head = h("h4");
-    head.append(iconSpan("stickyNote", 12), "付箋");
+    head.append(iconSpan("stickyNote", 12), m.inspector.colorTag);
     sec.append(head);
 
     const row = h("div", { class: "swatch-row" });
@@ -299,7 +298,7 @@ export function renderInspector(
       const b = h("button", {
         class: `swatch${color === undefined ? " swatch-none" : ` swatch-${color}`}${on ? " on" : ""}`,
         type: "button",
-        title: color === undefined ? "貼らない" : COLOR_LABEL[color],
+        title: color === undefined ? m.inspector.noColor : COLOR_LABEL[color],
         "aria-pressed": on ? "true" : "false",
       });
       // 押した色をもう一度押したら外す。「貼らない」まで手を伸ばさずに戻せる。
@@ -321,7 +320,7 @@ export function renderInspector(
     if (ids.length === 0) return;
     const sec = h("div", { class: "insp-section" });
     const head = h("h4");
-    head.append(iconSpan(iconName, 12), `${title}（${ids.length}）`);
+    head.append(iconSpan(iconName, 12), m.inspector.linkHead(title, ids.length));
     sec.append(head);
     const list = h("div", { class: "insp-list" });
     for (const id of ids) {
@@ -329,7 +328,7 @@ export function renderInspector(
       const row = h("div", { class: "insp-link-row" });
       const btn = h("button", { class: "insp-link", type: "button" });
       btn.append(child ? stateDot(resolveState(graph, id, cyclic)) : stateDot("BLOCKED"));
-      btn.append(h("span", {}, [child?.name ?? `${id}（未作成）`]));
+      btn.append(h("span", {}, [child?.name ?? m.inspector.missing(id)]));
       btn.addEventListener("click", () => cb.onFocus(id));
 
       // この繋がりだけを切る口は**右クリック**へ移した（2026-09-12）。ホバーで
@@ -354,8 +353,8 @@ export function renderInspector(
   // 上向きは Chain View に無いので残す。グラフは下向きしか描かず、パンくずは
   // 自分が辿ってきた道しか持たないため、親が複数ある合流ノードでは
   // ここを消すと他の親に到達できなくなる。
-  linkList("これを待っている", "listChecks", rev.requiredBy.get(selectedId) ?? [], "requires");
-  linkList("属する先", "chevronRight", rev.containedBy.get(selectedId) ?? [], "contains");
+  linkList(m.inspector.waitingOnThis, "listChecks", rev.requiredBy.get(selectedId) ?? [], "requires");
+  linkList(m.inspector.partOf, "chevronRight", rev.containedBy.get(selectedId) ?? [], "contains");
 
   // メモ（Markdown 本文そのもの。Obsidian で開いても同じものが見える）。
   //
@@ -364,12 +363,12 @@ export function renderInspector(
   // パネルで一番大きい塊が常に「書く顔」になる。
   const noteSec = h("div", { class: "insp-section" });
   const noteHead = h("h4");
-  noteHead.append(iconSpan("pencil", 12), "メモ");
-  const modeBtn = h("button", { class: "insp-mode-btn", type: "button" }, [view.noteEditing ? "閲覧" : "編集"]);
+  noteHead.append(iconSpan("pencil", 12), m.inspector.note);
+  const modeBtn = h("button", { class: "insp-mode-btn", type: "button" }, [view.noteEditing ? m.inspector.viewMode : m.inspector.editMode]);
   noteHead.append(modeBtn);
   noteSec.append(noteHead);
   if (view.noteEditing) {
-    const area = h("textarea", { class: "note-area", placeholder: "このノードについてのメモ" }) as HTMLTextAreaElement;
+    const area = h("textarea", { class: "note-area", placeholder: m.inspector.notePlaceholder }) as HTMLTextAreaElement;
     area.value = node.note;
     const commit = (): void => {
       if (area.value !== node.note) cb.onNoteChange(selectedId, area.value);
@@ -395,7 +394,7 @@ export function renderInspector(
       cb.onMenu({ kind: "note", id: selectedId }, ev.clientX, ev.clientY);
     });
     if (node.note.trim() === "") {
-      noteSec.append(h("p", { class: "insp-note" }, ["まだメモはありません。「編集」で書けます。"]));
+      noteSec.append(h("p", { class: "insp-note" }, [m.inspector.noNote]));
     } else {
       const body = h("div", { class: "note-view" });
       renderNote(body, node.note);
@@ -415,10 +414,10 @@ export function renderInspector(
     if (created !== undefined || updated !== undefined) {
       const dates = h("div", { class: "insp-dates" });
       if (created !== undefined) {
-        dates.append(h("span", { title: `作成 ${formatDateTime(created)}` }, [`作成 ${formatDate(created)}`]));
+        dates.append(h("span", { title: m.inspector.created(formatDateTime(created)) }, [m.inspector.created(formatDate(created))]));
       }
       if (updated !== undefined) {
-        dates.append(h("span", { title: `更新 ${formatDateTime(updated)}` }, [`更新 ${formatDate(updated)}`]));
+        dates.append(h("span", { title: m.inspector.updated(formatDateTime(updated)) }, [m.inspector.updated(formatDate(updated))]));
       }
       container.append(dates);
     }
@@ -432,7 +431,7 @@ export function renderInspector(
   // 構造としては正しいが、削除の副作用としては予想できない。
   const delBox = h("div", { class: "insp-delete" });
   const del = h("button", { class: "btn danger", type: "button", "data-tour": "delete" });
-  del.append(iconSpan("trash2", 14), "このノードを削除");
+  del.append(iconSpan("trash2", 14), m.inspector.deleteNode);
   del.addEventListener("click", () => {
     const orphans = (node.requires.concat(node.contains)).filter(
       (childId) => graph.nodes[childId] && inDegree(childId, rev) === 1,
@@ -441,20 +440,20 @@ export function renderInspector(
     // 戻せるのは直後の1手だけ（次に何か操作すると控えが入れ替わる）。「戻せます」
     // とだけ書くと、いつでも戻せるように読める。
     const warn = h("div", { class: "insp-confirm-text" }, [
-      `「${node.name}」を削除します。直後ならヘッダーの「戻す」で戻せます。`,
+      m.inspector.deleteConfirm(node.name),
     ]);
     delBox.append(warn);
     if (orphans.length > 0) {
       delBox.append(
         h("div", { class: "insp-confirm-note" }, [
-          `${orphans.length} 件（${orphans.map((id) => graph.nodes[id]!.name).join("・")}）が目的として一覧に出るようになります。`,
+          m.inspector.deleteOrphans(orphans.length, orphans.map((id) => graph.nodes[id]!.name).join(m.inspector.nameSep)),
         ]),
       );
     }
     const row = h("div", { class: "insp-row", style: "margin:8px 0 0" });
-    const yes = h("button", { class: "btn danger", type: "button", "data-tour": "delete-confirm" }, ["削除する"]);
+    const yes = h("button", { class: "btn danger", type: "button", "data-tour": "delete-confirm" }, [m.inspector.deleteYes]);
     yes.addEventListener("click", () => cb.onDelete(selectedId));
-    const no = h("button", { class: "btn", type: "button" }, ["やめる"]);
+    const no = h("button", { class: "btn", type: "button" }, [m.inspector.deleteNo]);
     no.addEventListener("click", () => {
       delBox.replaceChildren(del);
     });
