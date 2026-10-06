@@ -238,8 +238,8 @@ So what the screen says is not "please cut one of these" but "**one of the nodes
 - ✅ UI (Chain View / search and cross-cutting view / overview / map / recent changes / break down and bulk add / rename, delete, detach, undo / color tags and due dates / legend / auto-fix / tutorial and in-app manual / new windows / light and dark / Japanese and English)
 - ✅ Tauri shell (`sirube.exe` about 11MB / installer about 2.3MB)
 - ✅ UX checks on real hardware (ongoing on the author's machine)
-- ✅ Distribution (Releases of a private repository, limited to people who can read it)
-- ⬜ Going public
+- ✅ Distribution (Releases)
+- ✅ Public repository (2026-10-06)
 
 ```
 bun install
