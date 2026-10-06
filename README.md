@@ -46,9 +46,18 @@
 
 ### 1. 入れる
 
-[Releases](https://github.com/MotimotiNotch/sirube/releases) から Windows 向けインストーラ（`Sirube_0.2.0_x64-setup.exe` / 約 2MB）を落として実行する。
+[最新のリリース](https://github.com/MotimotiNotch/sirube/releases/latest)から、使っている OS のものを落とす。
+
+**Windows**: `Sirube_<版>_x64-setup.exe`（約 2.3MB）を実行する。
 
 > インストール時に **「Windows によって PC が保護されました」** と出る。コード署名証明書を取っていないだけで、警告の中身は「発行元が確認できない」。**詳細情報 → 実行** で進める。
+
+**Linux**: `Sirube_<版>_amd64.AppImage` に実行権限を付けて起動する。glibc 2.34 以上（Ubuntu 22.04 以降相当）で動く。
+
+```sh
+chmod +x Sirube_<版>_amd64.AppImage
+./Sirube_<版>_amd64.AppImage --appimage-extract-and-run
+```
 
 外部通信もアカウントも無い。入れたら終わり。
 
@@ -219,11 +228,11 @@ Sirube はこれを**「分解が足りない」信号**として扱う。待ち
 
 ## 状態
 
-**開発中。Windows 版を Releases で限定公開している（v0.2.0）。**
+**開発中。Windows 版と Linux 版（AppImage）を Releases で配布している。**
 
 - ✅ コア（状態導出・カスケード・循環検出・期限の伝播・DSL・Markdown ストア・整合性の自動解決）
 - ✅ UI（Chain View / 検索・横断ビュー・俯瞰・地図 / 最近の変更 / 分解する・まとめて書く / 改名・削除・外す・戻す / 付箋・期限 / 凡例 / 自動解決 / チュートリアル・アプリ内マニュアル / 別窓）
-- ✅ Tauri シェル（`sirube.exe` 約 10.5MB / インストーラ 約 2.2MB）
+- ✅ Tauri シェル（`sirube.exe` 約 11MB / インストーラ 約 2.3MB）
 - ✅ 実機での UX 確認（作者の手元で継続中）
 - ✅ 配布（private リポジトリの Releases。読める人に限られる）
 - ⬜ public 化
@@ -231,7 +240,7 @@ Sirube はこれを**「分解が足りない」信号**として扱う。待ち
 ```
 bun install
 bun run dev     # http://127.0.0.1:5177
-bun test        # 419 tests
+bun test
 bun run typecheck
 bun run release # 要 MSVC。scripts/with-msvc.bat 経由で走る
 ```
