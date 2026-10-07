@@ -279,4 +279,4 @@ bun run release # 要 MSVC。scripts/with-msvc.bat 経由で走る
 
 ## ライセンス
 
-MIT（予定）
+[MIT](LICENSE)

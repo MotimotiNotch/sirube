@@ -279,4 +279,4 @@ It's free to use. If it helps you, a tip on [Ko-fi](https://ko-fi.com/motimotino
 
 ## License
 
-MIT (planned)
+[MIT](LICENSE)
