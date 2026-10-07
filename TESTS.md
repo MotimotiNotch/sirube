@@ -25,10 +25,10 @@
 | `src/ui/flyout.test.ts` | 2 |
 | `src/ui/manual-doc.test.ts` | 6 |
 | `src/ui/note-view.test.ts` | 12 |
-| `src/ui/theme.test.ts` | 5 |
+| `src/ui/theme.test.ts` | 11 |
 | `src/ui/tutorial.test.ts` | 15 |
 | `src/ui/window-query.test.ts` | 3 |
-| **合計** | **461** |
+| **合計** | **467** |
 
 ---
 
@@ -821,6 +821,15 @@
 - 起動時に保存された設定を当てる
 - OS に合わせるときも、data-theme は light か dark に解決される
 - 別の窓で切り替わったら追随する（storage イベント）
+
+### 起動直後のテーマ（2026-10-07）
+
+- bootTheme は保存された設定を、initTheme を待たずに当てる
+- index.html は theme-boot.js を <head> で同期に、CSS より前に読む
+- ビルドが theme-boot.js を dist に焼く（index.html が参照する）
+- 窓の背景に塗る色は style.css の --bg と同じ
+- Rust 側（本窓の最初の背景）も同じ色
+- テーマを当てるたびに、シェルに解決済みの値を知らせる（タイトルバーをそろえる口）
 
 ---
 

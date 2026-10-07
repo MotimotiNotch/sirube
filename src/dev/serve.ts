@@ -52,10 +52,11 @@ async function mtimeOf(id: string): Promise<number> {
   }
 }
 
-async function bundle(): Promise<string> {
+async function bundle(entry = "./src/dev/main.ts", format: "esm" | "iife" = "esm"): Promise<string> {
   const built = await Bun.build({
-    entrypoints: ["./src/dev/main.ts"],
+    entrypoints: [entry],
     target: "browser",
+    format,
     sourcemap: "inline",
   });
   if (!built.success) {
@@ -148,6 +149,7 @@ const server = Bun.serve({
       }
 
       if (path === "/app.js") return new Response(await bundle(), { headers: noStore("text/javascript; charset=utf-8") });
+      if (path === "/theme-boot.js") return new Response(await bundle("./src/ui/theme-boot.ts", "iife"), { headers: noStore("text/javascript; charset=utf-8") });
       if (path === "/style.css") return new Response(Bun.file("./src/ui/style.css"), { headers: noStore("text/css; charset=utf-8") });
       return new Response(Bun.file("./index.html"), { headers: noStore("text/html; charset=utf-8") });
     } catch (err) {

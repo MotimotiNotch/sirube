@@ -21,6 +21,19 @@ if (!built.success) {
 }
 
 await writeFile(`${OUT}/app.js`, await built.outputs[0]!.text(), "utf8");
+
+// 起動直後のテーマ（index.html の <head> で同期に読む）。app.js とは別に、小さく焼く。
+const boot = await Bun.build({
+  entrypoints: ["./src/ui/theme-boot.ts"],
+  target: "browser",
+  format: "iife",
+  minify: true,
+});
+if (!boot.success) {
+  console.error(boot.logs.map(String).join("\n"));
+  process.exit(1);
+}
+await writeFile(`${OUT}/theme-boot.js`, await boot.outputs[0]!.text(), "utf8");
 await writeFile(`${OUT}/style.css`, await Bun.file("./src/ui/style.css").text(), "utf8");
 await writeFile(`${OUT}/index.html`, await Bun.file("./index.html").text(), "utf8");
 

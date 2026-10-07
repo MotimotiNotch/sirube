@@ -48,6 +48,18 @@ pub fn run() {
       crash::init(app.handle());
       crash::install_panic_hook(version.clone());
       crash::spawn_watchdog(version);
+      // 本窓の背景を、HTML が描かれる前から OS の明暗に合わせておく（2026-10-07）。
+      // WebView の既定は白なので、OS がダークだと起動の一瞬だけ白く光っていた。
+      // アプリの中で選んだテーマは localStorage にあってここからは読めないので、
+      // 既定の「OS に合わせる」に合わせる。選んだ値は画面側が読み込み直後に塗り直す
+      // （theme.ts の onThemeApplied）。色は style.css の --bg と同じ。
+      if let Some(main) = app.get_webview_window("main") {
+        let bg = match main.theme() {
+          Ok(tauri::Theme::Dark) => tauri::window::Color(0x16, 0x17, 0x1a, 0xff),
+          _ => tauri::window::Color(0xfb, 0xfb, 0xfa, 0xff),
+        };
+        let _ = main.set_background_color(Some(bg));
+      }
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()

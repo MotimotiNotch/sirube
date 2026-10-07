@@ -15,7 +15,8 @@ import { buildWindowQuery, parseWindowQuery } from "../ui/window-query.ts";
 import { getVersion } from "@tauri-apps/api/app";
 import { formatCrumbs, installCrashCapture } from "../ui/crash.ts";
 import { showCrashNotice } from "./crash-notice.ts";
-import { initTheme } from "../ui/theme.ts";
+import { currentResolvedTheme, initTheme, onThemeApplied, THEME_BG } from "../ui/theme.ts";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { initLang } from "../i18n/index.ts";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { resolveResource } from "@tauri-apps/api/path";
@@ -93,9 +94,13 @@ let windowSeq = 0;
  *  合わない名札の窓は、ファイルの読み書きの権限を持たずに開く。 */
 function openWindow(target: WindowTarget, vault: string): void {
   const label = `sub-${Date.now().toString(36)}-${windowSeq++}`;
+  // 窓を作った瞬間から今のテーマの色にしておく（既定の白で光らないように）。
+  const theme = currentResolvedTheme();
   const w = new WebviewWindow(label, {
     url: `index.html${buildWindowQuery(target, vault)}`,
     title: "Sirube",
+    theme,
+    backgroundColor: THEME_BG[theme],
     width: 1100,
     height: 760,
     minWidth: 900,
@@ -114,6 +119,14 @@ function showFatal(message: string): void {
   document.body.append(box);
 }
 
+// 窓のタイトルバーと背景も、アプリの中で選んだテーマにそろえる（2026-10-07）。
+// 何もしないと OS の設定に従うので、OS がライトでアプリだけダークにすると、白い
+// タイトルバーの下に暗い画面が来る。initTheme() の最初の適用でも呼ばれるよう先に登録する。
+onThemeApplied((theme) => {
+  const win = getCurrentWindow();
+  void win.setTheme(theme).catch(() => {});
+  void win.setBackgroundColor(THEME_BG[theme]).catch(() => {});
+});
 initTheme(); // vault を読む前に（読み込み中ずっとライトで光らないように）
 initLang(); // 描画より前に辞書を決める（フォルダ選択の文言もこれに従う）
 routeExternalLinks(openUrl); // メモやマニュアルのリンクは既定のブラウザで

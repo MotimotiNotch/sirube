@@ -42,15 +42,48 @@ function systemDark(): MediaQueryList | undefined {
   return typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : undefined;
 }
 
-function resolve(pref: ThemePref): "light" | "dark" {
+export type ResolvedTheme = "light" | "dark";
+
+export function resolveTheme(pref: ThemePref): ResolvedTheme {
   if (pref !== "system") return pref;
   return systemDark()?.matches ? "dark" : "light";
 }
 
+/** 背景色（style.css の --bg）。窓そのものの背景を塗るのに使う——WebView が HTML を
+ *  描く前と、窓の端を広げた瞬間は、ここで塗った色が見える。値は style.css と同じに
+ *  保つ（テストが見張る）。 */
+export const THEME_BG: Record<ResolvedTheme, string> = { light: "#fbfbfa", dark: "#16171a" };
+
 let current: ThemePref = "system";
+const appliedListeners: ((theme: ResolvedTheme) => void)[] = [];
 
 function apply(): void {
-  document.documentElement.dataset.theme = resolve(current);
+  const theme = resolveTheme(current);
+  document.documentElement.dataset.theme = theme;
+  for (const cb of appliedListeners) cb(theme);
+}
+
+/**
+ * 最初の描画より前に、保存されている設定を当てる（2026-10-07）。`theme-boot.ts` から
+ * `<head>` の同期スクリプトとして呼ばれる。
+ *
+ * `initTheme()` は約 700KB の `app.js` の中にあり、それが読み終わって動くまでの間、
+ * ヘッダーやボタンが CSS の既定（ライト）で描かれていた。「OS に合わせる」で OS が
+ * ダークでも同じで、`prefers-color-scheme` をやめて `data-theme` に寄せたときからの
+ * 後退だった。CSP が `default-src 'self'` なのでインラインには書けず、別ファイルにする。
+ */
+export function bootTheme(): void {
+  document.documentElement.dataset.theme = resolveTheme(readThemePref());
+}
+
+/** テーマを当てるたびに呼ぶ。シェル（Tauri）が窓のタイトルバーと背景をそろえるのに使う。 */
+export function onThemeApplied(cb: (theme: ResolvedTheme) => void): void {
+  appliedListeners.push(cb);
+}
+
+/** 今当たっているテーマ。 */
+export function currentResolvedTheme(): ResolvedTheme {
+  return resolveTheme(current);
 }
 
 export function currentThemePref(): ThemePref {
