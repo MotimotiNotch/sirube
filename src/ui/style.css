@@ -34,6 +34,13 @@
   --st-cyclic: #b06a12;
   --st-cyclic-bg: #fbf1e2;
 
+  /* 塗りの上に載せる文字と、外す系の文字。どちらも状態ではないが、ダークで値を
+     変える必要があるのでトークンにした（2026-10-07、release-checker の所見）。
+     WCAG のコントラスト比で確かめてある: --on-actionable は --st-actionable の上で
+     ライト 4.95 / ダーク 7.29、--danger は --bg-panel の上でライト 6.54 / ダーク 5.53。 */
+  --on-actionable: #ffffff;
+  --danger: #b3261e;
+
   /* 付箋（目的に貼る色）。状態の色（--st-*）と別系統だと一目で分かるよう、
      紙に近い淡いトーンにしてある。形も分けてある——状態は丸、付箋は棒。
      色に序列は無く、グレースケールでは互いに潰れるが、同じことを行の
@@ -73,6 +80,11 @@
   --st-blocked-bg: #1f2125;
   --st-cyclic: #ddaa55;
   --st-cyclic-bg: #2c2418;
+
+  /* 以前は白と #b3261e の直書きで、ダークでは 2.46 / 2.52 しかなかった。
+     --danger は循環の琥珀（相対輝度 0.45）より暗い 0.30 に置き、明るさでも分ける。 */
+  --on-actionable: #16171a;
+  --danger: #e57373;
 
   --tag-yellow: #d4bc5f;
   --tag-orange: #d19560;
@@ -169,10 +181,10 @@ button { font: inherit; color: inherit; }
 .btn.primary {
   background: var(--st-actionable);
   border-color: var(--st-actionable);
-  color: #fff;
+  color: var(--on-actionable);
 }
 .btn.primary:hover { filter: brightness(1.08); }
-.btn.danger { color: #b3261e; }
+.btn.danger { color: var(--danger); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 
 /* --- 本体レイアウト ------------------------------------------------------ */
@@ -943,9 +955,8 @@ body.no-inspector #inspector-resizer {
 .ctx-sep { height: 1px; margin: 4px 6px; background: var(--border); }
 .ctx-heading { padding: 4px 8px 2px; font-size: 11px; font-weight: 600; color: var(--fg-faint); }
 /* 外す系。**色だけで区別する**——確認を挟むほどではないが、隣の項目と
-   同じ顔で並ぶと押し間違える。色は `.btn.danger` と同じ値にしてある
-   （トークンが無いので増やさない。変えるときは2箇所）。 */
-.ctx-item.danger { color: #b3261e; }
+   同じ顔で並ぶと押し間違える。色は `.btn.danger` と同じ `--danger`。 */
+.ctx-item.danger { color: var(--danger); }
 
 /* --- インスペクタ -------------------------------------------------------- */
 
