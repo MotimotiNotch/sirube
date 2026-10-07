@@ -27,6 +27,9 @@ export const app: Shape<typeof Ja> = {
   themeDark: "Dark",
   themeGroup: "Appearance",
   langGroup: "Language",
+  aboutGroup: "About",
+  licenses: "Licenses",
+  licensesOpenFailed: "Couldn't open the license notices (THIRD_PARTY_LICENSES.txt, bundled with the app).",
   settingsTitle: (theme, lang) => `Settings (appearance: ${theme}, language: ${lang})`,
 
   fileIssues: (n) => `${n === 1 ? "1 file has a problem" : `${n} files have problems`} reading it.`,

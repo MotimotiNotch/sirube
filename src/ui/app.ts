@@ -184,6 +184,14 @@ export interface AppOptions {
    * 検査）がそのまま受け止める——他の窓の書き込みは、この窓からは「外」に見える。
    */
   sub?: { initial?: WindowTarget };
+  /**
+   * 同梱したライセンス表記（`THIRD_PARTY_LICENSES.txt`）を OS の既定のアプリで開く口
+   * （2026-10-07）。渡したシェルだけ、設定メニューに「ライセンス」が出る。dev サーバ版は
+   * 表記を同梱していないので渡さない。Linux の AppImage では中に入っていて、ファイルを
+   * 探しに行っても見えないので、アプリから辿れることがそのまま「見られる」ことになる。
+   * 失敗したら投げる——呼ぶ側が場所をトーストで出す。
+   */
+  openLicenses?: () => Promise<unknown>;
 }
 
 /** 前回開いていた場所の保存先。vault ごとには分けない——窓が複数あっても開く
@@ -2253,6 +2261,19 @@ export async function startApp(fs: SirubeFs, options: AppOptions = {}): Promise<
             ...(i === 0 ? { group: m.app.langGroup } : {}),
             onSelect: () => setLangPref(c.pref),
           })),
+          // ライセンス表記（2026-10-07）。新しい画面は作らず、同梱のファイルを外で開く。
+          ...(options.openLicenses
+            ? [
+                {
+                  group: m.app.aboutGroup,
+                  label: m.app.licenses,
+                  icon: "file-text" as const,
+                  onSelect: () => {
+                    void options.openLicenses!().catch(() => toast(m.app.licensesOpenFailed));
+                  },
+                },
+              ]
+            : []),
         ],
       );
     });

@@ -17,7 +17,8 @@ import { formatCrumbs, installCrashCapture } from "../ui/crash.ts";
 import { showCrashNotice } from "./crash-notice.ts";
 import { initTheme } from "../ui/theme.ts";
 import { initLang } from "../i18n/index.ts";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { resolveResource } from "@tauri-apps/api/path";
 import { routeExternalLinks } from "../ui/external-links.ts";
 import { m } from "../i18n/index.ts";
 
@@ -160,6 +161,9 @@ if (!vault) {
       ? { vault: { path: vault }, sub: query.initial ? { initial: query.initial } : {} }
       : { vault: { path: vault, switchVault } };
     options.openWindow = (target) => openWindow(target, vault);
+    // 同梱のライセンス表記（bundle.resources）を既定のアプリで開く。開ける場所は
+    // capabilities の opener:allow-open-path でこの1ファイルに絞ってある。
+    options.openLicenses = async () => openPath(await resolveResource("THIRD_PARTY_LICENSES.txt"));
     const app = await startApp(fs, options);
 
     // 前回までの記録を出す。本窓だけ（別窓で出すと、同じものを取り合う）。

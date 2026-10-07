@@ -3069,3 +3069,40 @@ describe("言語の切り替え（2026-10-06）", () => {
     expect(titles).toEqual([]);
   });
 });
+
+describe("設定メニューからライセンス表記を開く（2026-10-07）", () => {
+  const items = (): HTMLElement[] => Array.from(document.querySelectorAll(".ctx-menu .ctx-item")) as HTMLElement[];
+  const licenseItem = (): HTMLElement | undefined => items().find((b) => b.textContent === "ライセンス");
+
+  beforeEach(() => {
+    setThemePref("system");
+    document.body.innerHTML = HTML;
+    localStorage.clear();
+  });
+
+  test("シェルが開く口を渡したときだけ出て、押すとそれを呼ぶ", async () => {
+    let opened = 0;
+    await startApp(sampleFs(), { openLicenses: async () => void (opened += 1) });
+    $("theme-btn").click();
+    expect(licenseItem()).toBeTruthy();
+    licenseItem()!.click();
+    await Promise.resolve();
+    expect(opened).toBe(1);
+    expect(document.querySelector(".ctx-menu")).toBeNull(); // 選んだら閉じる
+  });
+
+  test("渡さないシェル（dev サーバ）には出ない", async () => {
+    await startApp(sampleFs());
+    $("theme-btn").click();
+    expect(items().length).toBeGreaterThan(0); // 陽性対照: メニュー自体は開いている
+    expect(licenseItem()).toBeUndefined();
+  });
+
+  test("開けなかったら、黙らずにトーストで言う", async () => {
+    await startApp(sampleFs(), { openLicenses: () => Promise.reject(new Error("forbidden path")) });
+    $("theme-btn").click();
+    licenseItem()!.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(text("toast-stack")).toContain("THIRD_PARTY_LICENSES.txt");
+  });
+});

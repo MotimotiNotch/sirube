@@ -25,6 +25,9 @@ export const app = {
   themeDark: "ダーク",
   themeGroup: "明るさ",
   langGroup: "言語",
+  aboutGroup: "このアプリ",
+  licenses: "ライセンス",
+  licensesOpenFailed: "ライセンス表記（アプリに同梱の THIRD_PARTY_LICENSES.txt）を開けませんでした。",
   settingsTitle: (theme: string, lang: string) => `設定（明るさ: ${theme}、言語: ${lang}）`,
 
   // ---- トースト
