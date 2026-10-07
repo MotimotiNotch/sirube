@@ -140,6 +140,9 @@ async function jsItems(): Promise<Item[]> {
   if (!built.success) throw new Error(built.logs.map(String).join("\n"));
   const meta = (built as unknown as { metafile?: { inputs: Record<string, unknown> } }).metafile;
   if (!meta) throw new Error("Bun.build が metafile を返しませんでした（Bun が古い？）");
+  // 鍵は名前ではなくディレクトリ。同じパッケージの別の版が入れ子で入り、両方バンドル
+  // されることがある（2026-10-07、@tauri-apps/api 2.11.1 と plugin-opener の下の 2.12.1）。
+  // 名前で束ねると後に見た方で上書きされ、metafile の並び次第で一覧が揺れていた。
   const dirs = new Map<string, string>();
   for (const raw of Object.keys(meta.inputs)) {
     const p = raw.split("\\").join("/");
@@ -147,10 +150,11 @@ async function jsItems(): Promise<Item[]> {
     if (i < 0) continue;
     const rest = p.slice(i + "node_modules/".length).split("/");
     const name = rest[0]!.startsWith("@") ? `${rest[0]}/${rest[1]}` : rest[0]!;
-    dirs.set(name, p.slice(0, i) + "node_modules/" + name);
+    const dir = p.slice(0, i) + "node_modules/" + name;
+    dirs.set(dir, name);
   }
   const items: Item[] = [];
-  for (const [name, dir] of dirs) {
+  for (const [dir, name] of dirs) {
     const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
     const license: string = pkg.license ?? "";
     // Tauri のプラグインは LICENSE.spdx（著作権の行だけ）しか同梱していない。

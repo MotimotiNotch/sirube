@@ -5,7 +5,7 @@ Sirube itself is licensed under the MIT License (see LICENSE.txt).
 This file lists the third-party software that is included in this build,
 with the license text each one requires to be reproduced.
 
-  JavaScript packages bundled into the UI: 6
+  JavaScript packages bundled into the UI: 7
   Rust crates linked into the executable:  153
   Rust standard library (rustc 1.98.0 (88d9e12ae 2026-08-18)):   see RUST_STD_COPYRIGHT.html
   Icons: Lucide (ISC; some icons MIT, derived from Feather)
@@ -16,6 +16,7 @@ JavaScript packages
 
 --------------------------------------------------------------------------------
 @tauri-apps/api 2.11.1  (Apache-2.0 OR MIT)  https://github.com/tauri-apps/tauri.git
+@tauri-apps/api 2.12.1  (Apache-2.0 OR MIT)  https://github.com/tauri-apps/tauri.git
 
 MIT License
 
