@@ -280,3 +280,5 @@ It's free to use. If it helps you, a tip on [Ko-fi](https://ko-fi.com/motimotino
 ## License
 
 [MIT](LICENSE)
+
+The notices for the third-party software bundled with Sirube (JavaScript packages, Rust crates, icons, and on Linux the system libraries) are in `THIRD_PARTY_LICENSES.txt` next to the installed app. The list for the Windows build is also at [licenses/THIRD_PARTY_LICENSES.txt](licenses/THIRD_PARTY_LICENSES.txt).

@@ -27,6 +27,11 @@
   "bundle": {
     "active": true,
     "license": "MIT",
+    "resources": {
+      "../LICENSE": "LICENSE.txt",
+      "../licenses/THIRD_PARTY_LICENSES.txt": "THIRD_PARTY_LICENSES.txt",
+      "../licenses/RUST_STD_COPYRIGHT.html": "RUST_STD_COPYRIGHT.html"
+    },
     "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",

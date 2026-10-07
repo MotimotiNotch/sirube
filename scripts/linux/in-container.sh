@@ -15,6 +15,9 @@ cd /build
 sed -i 's|^targets = .*|targets = ["x86_64-unknown-linux-gnu"]|' rust-toolchain.toml
 
 bun install --frozen-lockfile
+# 第三者のライセンス表記を Linux のクレート構成で焼き直す（Windows 版とは依存が違う）。
+# /build は複製なので、手元の licenses/ は書き換わらない。
+bun run scripts/gen-licenses.ts --target x86_64-unknown-linux-gnu
 bunx tauri build --bundles appimage
 
 # 同梱の libwayland-client が入っていないことを確かめる（2026-09-28 → 09-29 改め）。
@@ -57,6 +60,10 @@ grep -q 'sirube-ime.sh' squashfs-root/AppRun || { echo "AppRun にフックを�
 for m in im-fcitx5.so im-ibus.so; do
   [ -e "squashfs-root/usr/lib/gtk-3.0/3.0.0/immodules/$m" ] || { echo "$m が同梱されていない（Dockerfile の fcitx5-frontend-gtk3 / ibus-gtk3）" >&2; exit 1; }
 done
+# 同梱されたシステムのライブラリの表記を足す（中身と理由は append-system-licenses.sh）。
+notice=$(find squashfs-root -type f -name THIRD_PARTY_LICENSES.txt | head -1)
+[ -n "$notice" ] || { echo "THIRD_PARTY_LICENSES.txt が AppImage に入っていない（tauri.conf.json の bundle.resources）" >&2; exit 1; }
+sh /work/append-system-licenses.sh squashfs-root "$notice"
 rm -f "$img"
 ARCH=x86_64 appimagetool --no-appstream squashfs-root "$img"
 rm -rf squashfs-root

@@ -280,3 +280,5 @@ bun run release # 要 MSVC。scripts/with-msvc.bat 経由で走る
 ## ライセンス
 
 [MIT](LICENSE)
+
+同梱している第三者のソフトウェア（JavaScript のパッケージ・Rust のクレート・アイコン、Linux 版ではシステムのライブラリも）のライセンス表記は、インストール先の `THIRD_PARTY_LICENSES.txt` にあります。Windows 版の一覧は [licenses/THIRD_PARTY_LICENSES.txt](licenses/THIRD_PARTY_LICENSES.txt) でも読めます。

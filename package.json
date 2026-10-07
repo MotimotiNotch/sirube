@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit",
     "agents-doc": "bun run scripts/gen-agents-doc.ts",
     "manual-doc": "bun run scripts/gen-manual-doc.ts",
-    "test-doc": "bun run scripts/gen-test-doc.ts"
+    "test-doc": "bun run scripts/gen-test-doc.ts",
+    "licenses": "bun run scripts/gen-licenses.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

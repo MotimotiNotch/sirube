@@ -9,7 +9,7 @@
 //
 // with-msvc.bat を経由する理由は scripts/msvc-env.sh のコメントを参照。
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 
 const run = (argv: string[]): Promise<void> =>
@@ -28,5 +28,16 @@ if (process.platform !== "win32") {
 
 // バックスラッシュは文字列リテラルのエスケープ事故を起こすので、パスは join で組む。
 const bat = join(import.meta.dir, "with-msvc.bat");
+
+// 第三者のライセンス表記を焼き直してから包む。依存を足した次のリリースで一覧が
+// 古いまま配られるのを防ぐ（中身は scripts/gen-licenses.ts）。
+await run([process.execPath, "run", "scripts/gen-licenses.ts"]);
+
 await run(["cmd", "/c", bat, "bunx", "tauri", "build"]);
 await run([process.execPath, "run", "scripts/show-release.ts"]);
+
+// 焼き直しで変わっていたら、コミットし忘れを知らせる（配ったものとリポジトリの版がずれる）。
+const changed = spawnSync("git", ["status", "--porcelain", "--", "licenses"], { encoding: "utf8" }).stdout.trim();
+if (changed) {
+  console.warn(`\nlicenses/ が焼き直しで変わりました。リリースのコミットに含めてください:\n${changed}\n`);
+}

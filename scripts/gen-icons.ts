@@ -37,7 +37,7 @@ async function fetchIcon(name: string): Promise<string> {
 const camel = (s: string): string => s.replace(/-(.)/g, (_, c: string) => c.toUpperCase());
 
 const header = [
-  "// Lucide アイコン (MIT License, https://lucide.dev)",
+  "// Lucide アイコン (ISC License, https://lucide.dev。表記は licenses/lucide-LICENSE.txt)",
   "//",
   "// 公式 SVG をパス改変なしで取り込んでいる。追加するときも lucide-icons/lucide の",
   "// icons/<name>.svg をそのまま貼ること（線幅・キャップの統一が崩れるので自作しない）。",
