@@ -93,8 +93,11 @@ static WATCH: Watch = Watch {
 pub fn set_focused(focused: bool) {
   WATCH.focused.store(focused, Ordering::Relaxed);
   // 焦点が戻った瞬間を途絶えに数えない。裏にいた間は通知が間引かれている。
+  // ただし初回の通知が来る前は 0 のまま残す——ここで時刻を入れると見張りが
+  // 始まってしまい、起動中の読み込みや通知を送らない窓（`tauri dev` のブラウザ版）を
+  // 「固まった」と書く（2026-10-08、#231）。
   if focused {
-    WATCH.last_beat.store(now_ms(), Ordering::Relaxed);
+    let _ = WATCH.last_beat.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |last| (last != 0).then(now_ms));
   }
 }
 
@@ -204,5 +207,23 @@ fn prune(seen: &Path) {
   paths.sort();
   for p in &paths[..paths.len() - KEEP_SEEN] {
     let _ = fs::remove_file(p);
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  // WATCH は static なので、触るテストはこの1本に寄せる（並列に走ると互いに汚す）。
+  #[test]
+  fn focus_alone_does_not_start_the_watch() {
+    WATCH.last_beat.store(0, Ordering::Relaxed);
+    set_focused(true);
+    assert_eq!(WATCH.last_beat.load(Ordering::Relaxed), 0, "初回の通知の前に焦点だけで見張りが始まった");
+
+    // 通知が来た後は、焦点の戻りで時刻を進める（裏にいた間を途絶えに数えない）。
+    WATCH.last_beat.store(1, Ordering::Relaxed);
+    set_focused(true);
+    assert!(WATCH.last_beat.load(Ordering::Relaxed) > 1);
   }
 }
