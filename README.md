@@ -243,11 +243,14 @@ Sirube はこれを**「分解が足りない」信号**として扱う。待ち
 
 ```
 bun install
-bun run dev     # http://127.0.0.1:5177
+bun run dev     # http://127.0.0.1:5177（ブラウザ版。ファイル監視・別窓・ダイアログは Tauri 版と別物）
+bun run tauri build --debug --no-bundle   # Tauri 版を確かめるとき → src-tauri/target/debug/sirube.exe
 bun test
 bun run typecheck
 bun run release # 要 MSVC。scripts/with-msvc.bat 経由で走る
 ```
+
+`bun run tauri dev` は使わない。窓は開くが、中身は dev サーバが配るブラウザ版（`src/dev/main.ts`）で、Tauri 版の入口（`src/tauri/main.ts`）を通らない。
 
 ---
 

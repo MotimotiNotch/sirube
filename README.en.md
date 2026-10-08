@@ -243,11 +243,14 @@ So what the screen says is not "please cut one of these" but "**one of the nodes
 
 ```
 bun install
-bun run dev     # http://127.0.0.1:5177
+bun run dev     # http://127.0.0.1:5177 (browser build; file watching, windows and dialogs differ from the Tauri app)
+bun run tauri build --debug --no-bundle   # to check the Tauri app → src-tauri/target/debug/sirube.exe
 bun test
 bun run typecheck
 bun run release # needs MSVC. Runs through scripts/with-msvc.bat
 ```
+
+Do not use `bun run tauri dev`. It opens a window, but the page inside is the browser build served by the dev server (`src/dev/main.ts`), not the Tauri entry point (`src/tauri/main.ts`).
 
 ---
 
