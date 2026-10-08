@@ -15,27 +15,24 @@ name = "sirube_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.6.3", features = [] }
+tauri-build = { version = "2.7.1", features = [] }
 
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.3", features = [] }
-tauri-plugin-log = "2"
+tauri = { version = "2.12.1", features = [] }
+tauri-plugin-log = "2.10.0"
 # `watch` はフィーチャの下にある。有効にしないと watcher モジュールごと消え、
 # capabilities に fs:allow-watch を書いていても実行時に "Command watch not found"
 # になる（2026-08-31 の初回起動で踏んだ）。外部編集の即時反映は必須機能。
-tauri-plugin-fs = { version = "2.5.1", features = ["watch"] }
-tauri-plugin-dialog = "2.7.2"
+tauri-plugin-fs = { version = "2.6.0", features = ["watch"] }
+tauri-plugin-dialog = "2.8.1"
 # リンクを既定のブラウザで開く（メモの URL・マニュアルの Ko-fi。2026-10-06）。
 # WebView の target="_blank" 任せにすると、どこで開くかが WebView の既定に依存する。
-# 2.6 以降は tauri ^2.12 を要求する。上げると tauri 本体が 2.12 に引き上げられ、JS の
-# @tauri-apps/api 2.11 と食い違ってビルドが止まる。Tauri を 2.12 に上げるとき（vault の
-# チケット）に一緒に上げる。
-tauri-plugin-opener = "~2.5.5"
+tauri-plugin-opener = "2.7.0"
 
 # Linux だけ: WebView の入力メソッドの設定に触る（lib.rs の on_page_load）。
-# 版は wry が固定しているもの（=2.0.2）に揃える。ずれると別の型になって渡せない。
+# 版は wry が固定しているもの（=2.0.2。wry 0.57 / Tauri 2.12 でも同じ）に揃える。ずれると別の型になって渡せない。
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
