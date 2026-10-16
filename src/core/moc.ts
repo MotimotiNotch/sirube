@@ -157,6 +157,9 @@ function goalFileName(name: string, taken: Set<string>): string {
  * 詰まっている」のか分からないのが、この道具にとって一番まずい失敗の
  * 仕方。空欄のまま返さない。 */
 function stuckReason(g: Graph, rootId: string, cycles: CycleInfo): string {
+  // 達成した目的に「達成にできます」と出すと、読んだ AI がもう一度達成にしに行く
+  // （2026-10-16、#49・#64 で踏んだ）。地図には達成したゴールも載るので、ここにも来る。
+  if (g.nodes[rootId]?.satisfied) return "この目的は達成済みです。";
   const members = descendants(g, rootId);
   const onCycle = members.filter((id) => cycles.cyclic.has(id));
   if (onCycle.length > 0) {

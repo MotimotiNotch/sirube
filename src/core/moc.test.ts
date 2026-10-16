@@ -116,6 +116,14 @@ describe("MOC 3層の生成", () => {
     expect(doc(render(graph), INDEX_DOC)).toContain("必要なものは全部揃っています");
   });
 
+  test("達成した目的には「達成にできます」と出さない", () => {
+    const graph = g("引っ越し -> 家 -> 不動産");
+    for (const id of ["引っ越し", "家", "不動産"]) graph.nodes[id]!.satisfied = true;
+    const goal = doc(render(graph), `${GOALS_DIR}/引っ越し.md`);
+    expect(goal).toContain("この目的は達成済みです");
+    expect(goal).not.toContain("達成にできます");
+  });
+
   test("層2に出るのは直下の子だけ。孫は出さない", () => {
     // 子孫を全列挙すると結局また網羅になる。降りる先はノードのファイル。
     const graph = g("引っ越し -> 家 -> 不動産 -> 内見の予約を取る");
