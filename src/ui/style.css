@@ -136,6 +136,18 @@ button { font: inherit; color: inherit; }
 }
 .brand svg { color: var(--fg-muted); }
 
+/* Web デモだけに出る札（src/demo/main.ts）。保存されないことを触る前に知らせる */
+.demo-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.demo-badge:hover { color: var(--fg); border-color: var(--fg-muted); }
+
 .search-wrap {
   position: relative;
   flex: 1 1 auto;

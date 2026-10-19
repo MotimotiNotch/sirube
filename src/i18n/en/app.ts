@@ -13,6 +13,8 @@ export const app: Shape<typeof Ja> = {
   searchPlaceholder: "Search names and notes (empty for “Ready now”)",
   helpTitle: "Open the manual (the tutorial starts from here too)",
   goalsHeading: "Goals",
+  demoBadge: "Demo",
+  demoBadgeTitle: "Changes here are not saved. Reloading restores the starting state. Get the app on GitHub.",
   newGoalTitle: "Create a new goal",
   resizerTitle: "Drag to resize / drag to the edge to hide / double-click to reset",
 

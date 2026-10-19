@@ -9,6 +9,9 @@ export const app = {
   searchPlaceholder: "ノード名・本文を検索（空欄で「今やれること」）",
   helpTitle: "マニュアルを開く（チュートリアルもここから）",
   goalsHeading: "目的",
+  // ---- Web デモ（src/demo/main.ts）
+  demoBadge: "デモ版",
+  demoBadgeTitle: "ここでの変更は保存されません。読み込み直すと最初の状態に戻ります。アプリ本体は GitHub から入手できます。",
   newGoalTitle: "新しい目的を作る",
   resizerTitle: "ドラッグで幅を変える／端まで寄せて格納／ダブルクリックで既定に戻す",
 

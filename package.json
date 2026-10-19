@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "bun run src/dev/serve.ts",
     "build:web": "bun run scripts/build-web.ts",
+    "build:demo": "bun run scripts/build-demo.ts",
     "tauri": "tauri",
     "release": "bun run scripts/release.ts",
     "release:linux": "sh scripts/linux/build-appimage.sh",
