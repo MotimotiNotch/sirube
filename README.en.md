@@ -6,6 +6,8 @@
 
 > Start from a goal and keep asking "what does that need?" — what you can do today shows up at the ends. Leave it for six months, and the path is still there.
 
+![Breaking a goal down in one line, then marking what you can do now (blue) as done until its parent turns blue](docs/images/demo.en.gif)
+
 A task manager for long-running projects that **holds up when you stop and come back**.
 
 The name comes from the Japanese word *shirube* (道しるべ), "signpost", written in Kunrei-style romanization.
